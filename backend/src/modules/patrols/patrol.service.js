@@ -1,242 +1,162 @@
+import AppError from "../../shared/errors/AppError.js";
+
 import {
   withTransaction,
 } from "../../config/database.js";
 
-import AppError
-  from "../../shared/errors/AppError.js";
-
 import * as patrolRepository
   from "./patrol.repository.js";
 
-// Get the current date
-function getCurrentLocalDate() {
-  const date = new Date();
-
-  const year =
-    date.getFullYear();
-
-  const month =
-    String(
-      date.getMonth() + 1,
-    ).padStart(2, "0");
-
-  const day =
-    String(
-      date.getDate(),
-    ).padStart(2, "0");
-
-  return `${year}-${month}-${day}`;
+/**
+ * Today in the server's timezone, as YYYY-MM-DD. Containers run UTC so
+ * this matches the dashboard, which works in UTC throughout.
+ */
+function getCurrentDate() {
+  return new Date()
+    .toISOString()
+    .slice(0, 10);
 }
 
-// Validate if the scheduled inspection date is not in the past
-function validateScheduledDate(
-  scheduledDate,
+function normalizeDateOnly(value) {
+  return String(value ?? "").slice(0, 10);
+}
+
+function toPositiveInteger(value) {
+  const parsed = Number.parseInt(value, 10);
+
+  return Number.isInteger(parsed) && parsed > 0
+    ? parsed
+    : null;
+}
+
+/**
+ * The officer's own location, which bounds everything they may plan.
+ */
+async function requireOfficerLocation(
+  userId,
+  client,
 ) {
-  if (!scheduledDate) {
+  const location =
+    await patrolRepository.findUserLocation(
+      userId,
+      client,
+    );
+
+  if (!location) {
     throw new AppError(
-      "Scheduled date is required.",
+      "Your account is not assigned to a location, so audits cannot be planned. Ask an administrator to set your location.",
+      400,
+      "EHS_OFFICER_LOCATION_NOT_SET",
+    );
+  }
+
+  return location;
+}
+
+/**
+ * Everything the planning form needs, scoped to the officer's location:
+ * their units and zones, each zone's fixed areas, and the colleagues who
+ * can be assigned as auditor or auditee.
+ */
+export async function getPlanningLookups({ userId }) {
+  const location =
+    await requireOfficerLocation(userId);
+
+  const [scope, users] = await Promise.all([
+    patrolRepository.findPlanningScope(
+      location.id,
+    ),
+
+    patrolRepository.findUsersAtLocation({
+      plantId: location.id,
+
+      /*
+       * The officer plans the audit; they do not walk it. Excluding
+       * them keeps them out of both dropdowns.
+       */
+      excludeUserId: userId,
+    }),
+  ]);
+
+  return {
+    location,
+    units: scope.units,
+    zones: scope.zones,
+    users,
+  };
+}
+
+function validateScheduleInput({
+  zoneId,
+  scheduledDate,
+  auditorId,
+  auditeeId,
+}) {
+  const normalizedZoneId =
+    toPositiveInteger(zoneId);
+
+  if (!normalizedZoneId) {
+    throw new AppError(
+      "Select the zone to be audited.",
+      400,
+      "INSPECTION_ZONE_REQUIRED",
+    );
+  }
+
+  const normalizedDate =
+    normalizeDateOnly(scheduledDate);
+
+  if (!normalizedDate) {
+    throw new AppError(
+      "Audit date is required.",
       400,
       "SCHEDULED_DATE_REQUIRED",
     );
   }
 
-  const parsedDate =
-    new Date(
-      `${scheduledDate}T00:00:00`,
-    );
-
   if (
     Number.isNaN(
-      parsedDate.getTime(),
+      new Date(
+        `${normalizedDate}T00:00:00Z`,
+      ).getTime(),
     )
   ) {
     throw new AppError(
-      "Select a valid scheduled date.",
+      "Select a valid audit date.",
       400,
       "INVALID_SCHEDULED_DATE",
     );
   }
 
-  if (
-    scheduledDate <
-    getCurrentLocalDate()
-  ) {
+  /*
+   * Both sides are YYYY-MM-DD, so a string comparison is a date
+   * comparison. Today is allowed.
+   */
+  if (normalizedDate < getCurrentDate()) {
     throw new AppError(
-      "An audit cannot be scheduled in the past.",
+      "The audit date cannot be in the past.",
       400,
       "AUDIT_DATE_IN_PAST",
     );
   }
-}
-
-// Validate the required values
-function validateRequiredValue({
-  value,
-  message,
-  code,
-}) {
-  if (!String(value ?? "").trim()) {
-    throw new AppError(
-      message,
-      400,
-      code,
-    );
-  }
-}
-
-// Find the location, unit, zone, area details, auditors and auditees
-// from the Postgres database for planning
-export async function getPlanningLookups() {
-  const [
-    locations,
-    units,
-    zones,
-    areaDetails,
-    auditors,
-    auditees,
-  ] = await Promise.all([
-    patrolRepository
-      .findActivePlanningLocations(),
-
-    patrolRepository
-      .findActivePlanningUnits(),
-
-    patrolRepository
-      .findActivePlanningZones(),
-
-    patrolRepository
-      .findActivePlanningAreaDetails(),
-
-    patrolRepository
-      .findActiveUsersByRole(
-        "AUDITOR",
-      ),
-
-    patrolRepository
-      .findActiveUsersByRole(
-        "AUDITEE",
-      ),
-  ]);
-
-  return {
-    locations,
-    units,
-    zones,
-    areaDetails,
-    auditors,
-    auditees,
-  };
-}
-
-// Schedule a patrol //
-// Validates all the attributes first if they are empty //
-// Validate if all the selected attributes exist for the heirarchy //
-// Assign the values and create inspection //
-export async function schedulePatrol({
-  userId,
-  location,
-  unit,
-  zone,
-  areaDetail,
-  scheduledDate,
-  auditorId,
-  auditeeId,
-}) {
-  const normalizedLocation =
-    String(location ?? "").trim();
-
-  const normalizedUnit =
-    String(unit ?? "").trim();
-
-  const normalizedZone =
-    String(zone ?? "").trim();
-
-  const normalizedAreaDetail =
-    String(areaDetail ?? "").trim();
-
-  const normalizedDate =
-    String(scheduledDate ?? "")
-      .trim()
-      .slice(0, 10);
 
   const normalizedAuditorId =
-    Number(auditorId);
+    toPositiveInteger(auditorId);
 
-  const normalizedAuditeeId =
-    Number(auditeeId);
-
-  const normalizedUserId =
-    Number(userId);
-
-  validateRequiredValue({
-    value:
-      normalizedLocation,
-
-    message:
-      "Location is required.",
-
-    code:
-      "INSPECTION_LOCATION_REQUIRED",
-  });
-
-  validateRequiredValue({
-    value:
-      normalizedUnit,
-
-    message:
-      "Unit is required.",
-
-    code:
-      "INSPECTION_UNIT_REQUIRED",
-  });
-
-  validateRequiredValue({
-    value:
-      normalizedZone,
-
-    message:
-      "Zone is required.",
-
-    code:
-      "INSPECTION_ZONE_REQUIRED",
-  });
-
-  validateRequiredValue({
-    value:
-      normalizedAreaDetail,
-
-    message:
-      "Area detail is required.",
-
-    code:
-      "INSPECTION_AREA_REQUIRED",
-  });
-
-  validateScheduledDate(
-    normalizedDate,
-  );
-
-  if (
-    !Number.isInteger(
-      normalizedAuditorId,
-    ) ||
-    normalizedAuditorId < 1
-  ) {
+  if (!normalizedAuditorId) {
     throw new AppError(
-      "Select a valid auditor.",
+      "Select the auditor for this audit.",
       400,
       "INVALID_AUDITOR_ID",
     );
   }
 
-  if (
-    !Number.isInteger(
-      normalizedAuditeeId,
-    ) ||
-    normalizedAuditeeId < 1
-  ) {
+  const normalizedAuditeeId =
+    toPositiveInteger(auditeeId);
+
+  if (!normalizedAuditeeId) {
     throw new AppError(
-      "Select a valid auditee.",
+      "Select the auditee for this audit.",
       400,
       "INVALID_AUDITEE_ID",
     );
@@ -253,290 +173,163 @@ export async function schedulePatrol({
     );
   }
 
+  return {
+    zoneId: normalizedZoneId,
+    scheduledDate: normalizedDate,
+    auditorId: normalizedAuditorId,
+    auditeeId: normalizedAuditeeId,
+  };
+}
+
+export async function schedulePatrol(input) {
+  const {
+    zoneId,
+    scheduledDate,
+    auditorId,
+    auditeeId,
+  } = validateScheduleInput(input);
+
+  const patrolId = await withTransaction(
+    async (client) => {
+      /*
+       * Re-read the officer's location inside the transaction. The
+       * scoped dropdowns are presentation; this is the boundary that
+       * actually stops an audit being planned somewhere else.
+       */
+      const location =
+        await requireOfficerLocation(
+          input.userId,
+          client,
+        );
+
+      const zone =
+        await patrolRepository
+          .findZoneWithHierarchy(
+            zoneId,
+            client,
+          );
+
+      if (!zone) {
+        throw new AppError(
+          "The selected zone was not found.",
+          400,
+          "ZONE_NOT_FOUND",
+        );
+      }
+
+      if (zone.plantId !== location.id) {
+        throw new AppError(
+          "The selected zone is outside the location you are responsible for.",
+          403,
+          "ZONE_OUTSIDE_OFFICER_DOMAIN",
+        );
+      }
+
+      /*
+       * An auditor sent to a zone with no areas configured has nothing
+       * to inspect, and the observation form would have no area to
+       * attribute a finding to.
+       */
+      if (zone.areaCount === 0) {
+        throw new AppError(
+          "The selected zone has no areas configured, so an audit cannot be scheduled for it.",
+          400,
+          "ZONE_HAS_NO_AREAS",
+        );
+      }
+
+      const auditor =
+        await patrolRepository
+          .findActiveUserAtLocation(
+            {
+              userId: auditorId,
+              plantId: location.id,
+            },
+            client,
+          );
+
+      if (!auditor) {
+        throw new AppError(
+          "The selected auditor is not an active user at this location.",
+          400,
+          "INVALID_AUDITOR",
+        );
+      }
+
+      const auditee =
+        await patrolRepository
+          .findActiveUserAtLocation(
+            {
+              userId: auditeeId,
+              plantId: location.id,
+            },
+            client,
+          );
+
+      if (!auditee) {
+        throw new AppError(
+          "The selected auditee is not an active user at this location.",
+          400,
+          "INVALID_AUDITEE",
+        );
+      }
+
+      const conflict =
+        await patrolRepository
+          .findSchedulingConflict(
+            {
+              scheduledDate,
+              auditorId,
+              auditeeId,
+            },
+            client,
+          );
+
+      if (conflict) {
+        throw new AppError(
+          conflict.conflict_type === "AUDITOR"
+            ? "The selected auditor already has an audit scheduled on this date."
+            : "The selected auditee already has an audit scheduled on this date.",
+          409,
+          conflict.conflict_type === "AUDITOR"
+            ? "AUDITOR_SCHEDULING_CONFLICT"
+            : "AUDITEE_SCHEDULING_CONFLICT",
+        );
+      }
+
+      const createdId =
+        await patrolRepository.createPatrol(
+          {
+            unitId: zone.unitId,
+            zoneId: zone.zoneId,
+            plantName: zone.plantName,
+            auditorId,
+            auditeeId,
+            scheduledDate,
+            ehsOfficerId: input.userId,
+          },
+          client,
+        );
+
+      if (!createdId) {
+        throw new AppError(
+          "The audit could not be scheduled.",
+          500,
+          "AUDIT_SCHEDULING_FAILED",
+        );
+      }
+
+      return createdId;
+    },
+  );
+
   const patrol =
-    await withTransaction(
-      async (client) => {
-        /*
-         * Confirm that the authenticated user remains an
-         * active EHS Officer.
-         */
-        const ehsOfficer =
-          await patrolRepository
-            .findActiveUserWithRole(
-              {
-                userId:
-                  normalizedUserId,
-
-                roleCode:
-                  "EHS_OFFICER",
-              },
-              client,
-            );
-
-        if (!ehsOfficer) {
-          throw new AppError(
-            "Only an active EHS Officer can schedule an audit.",
-            403,
-            "EHS_OFFICER_REQUIRED",
-          );
-        }
-
-        /*
-         * Validate the selected auditor against registered
-         * active users and role assignments.
-         */
-        const auditor =
-          await patrolRepository
-            .findActiveUserWithRole(
-              {
-                userId:
-                  normalizedAuditorId,
-
-                roleCode:
-                  "AUDITOR",
-              },
-              client,
-            );
-
-        if (!auditor) {
-          throw new AppError(
-            "The selected auditor is not an active registered Auditor.",
-            400,
-            "INVALID_AUDITOR",
-          );
-        }
-
-        /*
-         * Validate the selected auditee against registered
-         * active users and role assignments.
-         */
-        const auditee =
-          await patrolRepository
-            .findActiveUserWithRole(
-              {
-                userId:
-                  normalizedAuditeeId,
-
-                roleCode:
-                  "AUDITEE",
-              },
-              client,
-            );
-
-        if (!auditee) {
-          throw new AppError(
-            "The selected auditee is not an active registered Auditee.",
-            400,
-            "INVALID_AUDITEE",
-          );
-        }
-
-        /*
-         * Validate the submitted location against the
-         * active plants stored in PostgreSQL.
-         */
-        const plantRecord =
-          await patrolRepository
-            .findActivePlanningPlant(
-              normalizedLocation,
-              client,
-            );
-
-        if (!plantRecord) {
-          throw new AppError(
-            "The selected location is not available for audit planning.",
-            400,
-            "INSPECTION_LOCATION_NOT_FOUND",
-          );
-        }
-
-        /*
-         * Validate that the selected unit belongs to the
-         * selected canonical plant.
-         */
-        const unitRecord =
-          await patrolRepository
-            .findActiveUnitForPlant(
-              {
-                plantId:
-                  plantRecord.id,
-
-                unitNumber:
-                  normalizedUnit,
-              },
-              client,
-            );
-
-        if (!unitRecord) {
-          throw new AppError(
-            "The selected unit does not exist for the selected location.",
-            400,
-            "UNIT_NOT_FOUND_FOR_LOCATION",
-          );
-        }
-
-        /*
-         * Validate that the selected zone belongs to the
-         * selected unit.
-         */
-        const zoneRecord =
-          await patrolRepository
-            .findActiveZoneForUnit(
-              {
-                unitId:
-                  unitRecord.id,
-
-                zoneNumber:
-                  normalizedZone,
-              },
-              client,
-            );
-
-        if (!zoneRecord) {
-          throw new AppError(
-            "The selected zone does not exist for the selected unit.",
-            400,
-            "ZONE_NOT_FOUND_FOR_UNIT",
-          );
-        }
-
-        /*
-         * Validate the area detail against the database
-         * configuration for the selected zone.
-         */
-        const areaDetailRecord =
-          await patrolRepository
-            .findActiveAreaDetail(
-              {
-                areaDetail:
-                  normalizedAreaDetail,
-
-                zoneId:
-                  zoneRecord.id,
-              },
-              client,
-            );
-
-        if (!areaDetailRecord) {
-          throw new AppError(
-            "The selected area detail is not available for the selected zone.",
-            400,
-            "AREA_DETAIL_NOT_FOUND_FOR_ZONE",
-          );
-        }
-
-        /*
-         * Prevent role-specific scheduling conflicts.
-         */
-        const conflict =
-          await patrolRepository
-            .findSchedulingConflict(
-              {
-                scheduledDate:
-                  normalizedDate,
-
-                auditorId:
-                  normalizedAuditorId,
-
-                auditeeId:
-                  normalizedAuditeeId,
-              },
-              client,
-            );
-
-        if (conflict) {
-          if (
-            conflict.conflict_type ===
-            "AUDITOR_ALREADY_ASSIGNED"
-          ) {
-            throw new AppError(
-              "The selected auditor already has an audit scheduled for this date.",
-              409,
-              "AUDITOR_SCHEDULING_CONFLICT",
-            );
-          }
-
-          if (
-            conflict.conflict_type ===
-            "AUDITEE_ALREADY_ASSIGNED"
-          ) {
-            throw new AppError(
-              "The selected auditee already has an audit scheduled for this date.",
-              409,
-              "AUDITEE_SCHEDULING_CONFLICT",
-            );
-          }
-
-          throw new AppError(
-            "The selected users already have an audit scheduled for this date.",
-            409,
-            "AUDIT_SCHEDULING_CONFLICT",
-          );
-        }
-
-        const createdPatrol =
-          await patrolRepository
-            .createPatrol(
-              {
-                location:
-                  plantRecord.name,
-
-                unitId:
-                  unitRecord.id,
-
-                zoneId:
-                  zoneRecord.id,
-
-                areaDetail:
-                  areaDetailRecord
-                    .area_detail,
-
-                scheduledDate:
-                  normalizedDate,
-
-                auditorId:
-                  normalizedAuditorId,
-
-                auditeeId:
-                  normalizedAuditeeId,
-
-                ehsOfficerId:
-                  normalizedUserId,
-              },
-              client,
-            );
-
-        if (!createdPatrol) {
-          throw new AppError(
-            "The audit could not be scheduled.",
-            500,
-            "AUDIT_SCHEDULING_FAILED",
-          );
-        }
-
-        const completePatrol =
-          await patrolRepository
-            .findPatrolById(
-              createdPatrol.id,
-              client,
-            );
-
-        if (!completePatrol) {
-          throw new AppError(
-            "The scheduled audit could not be retrieved.",
-            500,
-            "SCHEDULED_AUDIT_NOT_FOUND",
-          );
-        }
-
-        return completePatrol;
-      },
+    await patrolRepository.findPatrolById(
+      patrolId,
     );
 
   return {
-    message:
-      "Audit scheduled successfully.",
-
+    message: "Audit scheduled successfully.",
     patrol,
   };
 }

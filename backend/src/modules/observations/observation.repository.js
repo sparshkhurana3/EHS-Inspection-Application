@@ -39,8 +39,14 @@ function mapAssignment(row) {
     plantLocation:
       row.plant_location,
 
+    /*
+     * The zone description, kept for display. The area a finding
+     * occurred in is chosen by the auditor from `areas` below.
+     */
     observationLocation:
       row.area_detail,
+
+    areas: row.areas ?? [],
 
     auditorId:
       row.auditor_id,
@@ -99,6 +105,12 @@ function mapReport(row) {
 
     riskCategory:
       row.risk_category,
+
+    zoneAreaId:
+      row.zone_area_id ?? null,
+
+    areaName:
+      row.area_name ?? null,
 
     photographPath:
       row.photograph_path,
@@ -203,7 +215,16 @@ export async function findCalendarPatrols({
  * Week number is the sequential patrol number for that Zone,
  * ordered by scheduled date and patrol ID.
  */
-export async function findCurrentAuditorAssignments(
+/**
+ * Every non-cancelled patrol in the current week where this user is the
+ * auditor, each with its observation report if one has been filed.
+ *
+ * The previous version excluded filed observations twice over, by patrol
+ * status and by requiring no report row, so the page could never show a
+ * submitted report. Both filters are gone: the caller decides what is
+ * pending and what is submitted.
+ */
+export async function findWeeklyAuditorAssignments(
   {
     auditorId,
     currentDate,
@@ -254,8 +275,31 @@ export async function findCurrentAuditorAssignments(
         auditee.full_name AS auditee_name,
 
         patrol.ehs_officer_id,
-        ehs_officer.full_name
-          AS ehs_officer_name
+        ehs_officer.full_name AS ehs_officer_name,
+
+        observation_report.id AS report_id,
+        observation_report.report_number,
+        observation_report.status AS report_status,
+        observation_report.submitted_at,
+        observation_report.category,
+        observation_report.risk_category,
+        observation_report.zone_area_id,
+        report_area.name AS report_area_name,
+
+        COALESCE(
+          JSON_AGG(
+            JSON_BUILD_OBJECT(
+              'id', zone_area.id,
+              'name', zone_area.name
+            )
+            ORDER BY
+              zone_area.display_order,
+              zone_area.name
+          ) FILTER (
+            WHERE zone_area.id IS NOT NULL
+          ),
+          '[]'::JSON
+        ) AS areas
 
       FROM patrols AS patrol
 
@@ -266,8 +310,7 @@ export async function findCurrentAuditorAssignments(
         ON unit_record.id = patrol.unit_id
 
       JOIN plants AS plant_record
-        ON plant_record.id =
-           unit_record.plant_id
+        ON plant_record.id = unit_record.plant_id
 
       JOIN zones AS zone_record
         ON zone_record.id = patrol.zone_id
@@ -279,52 +322,61 @@ export async function findCurrentAuditorAssignments(
         ON auditee.id = patrol.auditee_id
 
       LEFT JOIN users AS ehs_officer
-        ON ehs_officer.id =
-           patrol.ehs_officer_id
+        ON ehs_officer.id = patrol.ehs_officer_id
 
-      LEFT JOIN observation_reports
-        AS observation_report
-        ON observation_report.patrol_id =
-           patrol.id
+      LEFT JOIN observation_reports AS observation_report
+        ON observation_report.patrol_id = patrol.id
+
+      LEFT JOIN zone_areas AS report_area
+        ON report_area.id = observation_report.zone_area_id
+
+      LEFT JOIN zone_areas AS zone_area
+        ON zone_area.zone_id = zone_record.id
+       AND zone_area.is_active = TRUE
 
       WHERE
         patrol.auditor_id = $1
+        AND patrol.status <> 'CANCELLED'
 
         AND patrol.scheduled_date >=
-          DATE_TRUNC(
-            'week',
-            $2::DATE
-          )::DATE
+          DATE_TRUNC('week', $2::DATE)::DATE
 
         AND patrol.scheduled_date <
           (
-            DATE_TRUNC(
-              'week',
-              $2::DATE
-            ) +
-            INTERVAL '7 days'
+            DATE_TRUNC('week', $2::DATE)
+            + INTERVAL '7 days'
           )::DATE
 
-        AND patrol.status IN (
-          'SCHEDULED',
-          'IN_PROGRESS'
-        )
-
-        AND observation_report.id IS NULL
+      GROUP BY
+        patrol.id, sequence.week_number,
+        unit_record.id, zone_record.id, plant_record.id,
+        auditor.full_name, auditee.full_name,
+        ehs_officer.full_name,
+        observation_report.id, report_area.name
 
       ORDER BY
         patrol.scheduled_date ASC,
         patrol.id ASC
     `,
-    [
-      auditorId,
-      currentDate,
-    ],
+    [auditorId, currentDate],
   );
 
-  return result.rows.map(
-    mapAssignment,
-  );
+  return result.rows.map((row) => ({
+    ...mapAssignment(row),
+
+    report: row.report_id
+      ? {
+          id: row.report_id,
+          reportNumber: row.report_number,
+          status: row.report_status,
+          submittedAt: row.submitted_at,
+          category: row.category,
+          riskCategory: row.risk_category,
+          zoneAreaId: row.zone_area_id,
+          areaName: row.report_area_name,
+        }
+      : null,
+  }));
 }
 
 export async function findPhotographByReportId(
@@ -475,7 +527,22 @@ export async function findPatrolForSubmission(
 
         patrol.ehs_officer_id,
         ehs_officer.full_name
-          AS ehs_officer_name
+          AS ehs_officer_name,
+
+        COALESCE(
+          JSON_AGG(
+            JSON_BUILD_OBJECT(
+              'id', zone_area.id,
+              'name', zone_area.name
+            )
+            ORDER BY
+              zone_area.display_order,
+              zone_area.name
+          ) FILTER (
+            WHERE zone_area.id IS NOT NULL
+          ),
+          '[]'::JSON
+        ) AS areas
 
       FROM patrols patrol
 
@@ -498,9 +565,18 @@ export async function findPatrolForSubmission(
         ON ehs_officer.id =
            patrol.ehs_officer_id
 
+      LEFT JOIN zone_areas zone_area
+        ON zone_area.zone_id = patrol.zone_id
+       AND zone_area.is_active = TRUE
+
       WHERE
         patrol.id = $1
         AND patrol.auditor_id = $2
+
+      GROUP BY
+        patrol.id, unit.id, zone.id, plant.id,
+        auditor.full_name, auditee.full_name,
+        ehs_officer.full_name
 
       LIMIT 1
     `,
@@ -564,6 +640,7 @@ export async function createReport(
     category,
     description,
     riskCategory,
+    zoneAreaId,
     photograph,
   },
   client,
@@ -584,7 +661,8 @@ export async function createReport(
         photograph_mime_type,
         photograph_size,
         description,
-        risk_category
+        risk_category,
+        zone_area_id
       )
       VALUES (
         $1,
@@ -600,7 +678,8 @@ export async function createReport(
         $10,
         $11,
         $12,
-        $13
+        $13,
+        $14
       )
       RETURNING
         id,
@@ -614,6 +693,7 @@ export async function createReport(
         photograph_original_name,
         description,
         risk_category,
+        zone_area_id,
         submitted_at,
         closed_at
     `,
@@ -631,6 +711,7 @@ export async function createReport(
       photograph.size,
       description,
       riskCategory,
+      zoneAreaId,
     ],
   );
 
@@ -663,6 +744,7 @@ export async function createReport(
           photograph_original_name,
           description,
           risk_category,
+          zone_area_id,
           submitted_at,
           closed_at
       `,
@@ -694,4 +776,110 @@ export async function updatePatrolAfterSubmission(
     `,
     [patrolId],
   );
+}
+
+/**
+ * One observation report with the context needed to display it.
+ *
+ * Ownership mirrors the photograph route: the auditor who filed it, the
+ * auditee who must act on it, and the EHS Officer who owns the patrol.
+ * Anyone else gets nothing, so a guessed id leaks no data.
+ */
+export async function findReportByIdForUser(
+  {
+    reportId,
+    userId,
+  },
+  client = databasePool,
+) {
+  const result = await client.query(
+    `
+      SELECT
+        observation_report.id,
+        observation_report.report_number,
+        observation_report.patrol_id,
+        observation_report.status,
+        observation_report.finding_date,
+        observation_report.plant_location,
+        observation_report.observation_location,
+        observation_report.category,
+        observation_report.description,
+        observation_report.risk_category,
+        observation_report.photograph_path,
+        observation_report.photograph_original_name,
+        observation_report.submitted_at,
+        observation_report.closed_at,
+        observation_report.zone_area_id,
+
+        zone_area.name AS area_name,
+
+        patrol.scheduled_date,
+        unit_record.name AS unit_name,
+        unit_record.unit_number,
+        zone_record.name AS zone_name,
+        zone_record.zone_number,
+        plant_record.name AS plant_name,
+
+        auditor.full_name AS auditor_name,
+        auditee.full_name AS auditee_name,
+        ehs_officer.full_name AS ehs_officer_name
+
+      FROM observation_reports AS observation_report
+
+      JOIN patrols AS patrol
+        ON patrol.id = observation_report.patrol_id
+
+      JOIN units AS unit_record
+        ON unit_record.id = patrol.unit_id
+
+      JOIN plants AS plant_record
+        ON plant_record.id = unit_record.plant_id
+
+      JOIN zones AS zone_record
+        ON zone_record.id = patrol.zone_id
+
+      JOIN users AS auditor
+        ON auditor.id = patrol.auditor_id
+
+      JOIN users AS auditee
+        ON auditee.id = patrol.auditee_id
+
+      LEFT JOIN users AS ehs_officer
+        ON ehs_officer.id = patrol.ehs_officer_id
+
+      LEFT JOIN zone_areas AS zone_area
+        ON zone_area.id = observation_report.zone_area_id
+
+      WHERE
+        observation_report.id = $1
+        AND (
+          patrol.auditor_id = $2
+          OR patrol.auditee_id = $2
+          OR patrol.ehs_officer_id = $2
+        )
+
+      LIMIT 1
+    `,
+    [reportId, userId],
+  );
+
+  const row = result.rows[0];
+
+  if (!row) {
+    return null;
+  }
+
+  return {
+    ...mapReport(row),
+
+    scheduledDate: row.scheduled_date,
+    unitName: row.unit_name,
+    unitNumber: row.unit_number,
+    zoneName: row.zone_name,
+    zoneNumber: row.zone_number,
+    plantName: row.plant_name,
+    auditorName: row.auditor_name,
+    auditeeName: row.auditee_name,
+    ehsOfficerName: row.ehs_officer_name,
+  };
 }

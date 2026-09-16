@@ -9,348 +9,225 @@ import {
   schedulePatrol,
 } from "./patrol.service.js";
 
-const INITIAL_FORM_VALUES = {
-  location: "",
-  unit: "",
-  zone: "",
-  areaDetail: "",
+import {
+  getErrorMessage,
+} from "../../lib/errorMessage.js";
+
+const EMPTY_FORM = {
+  unitId: "",
+  zoneId: "",
   scheduledDate: "",
   auditorId: "",
   auditeeId: "",
 };
 
-function getErrorMessage(error) {
-  if (
-    error instanceof TypeError &&
-    error.message === "Failed to fetch"
-  ) {
-    return (
-      "Unable to connect to the EHS API. " +
-      "Check that the backend is running."
-    );
-  }
-
-  if (
-    Array.isArray(error?.details) &&
-    error.details.length > 0
-  ) {
-    return error.details
-      .map((detail) => {
-        return (
-          detail?.message ??
-          detail?.msg
-        );
-      })
-      .filter(Boolean)
-      .join(" ");
-  }
-
-  return (
-    error?.message ??
-    "An unexpected audit planning error occurred."
-  );
-}
-
-function getInitialFormValues() {
-  return {
-    ...INITIAL_FORM_VALUES,
-  };
-}
-
+/**
+ * Planning state for the signed-in EHS Officer.
+ *
+ * Everything selectable comes from the API, which scopes it to the
+ * officer's own location. Nothing about which cities, units, zones or
+ * areas exist is held in the frontend.
+ */
 export default function usePatrols() {
+  const [lookups, setLookups] = useState({
+    location: null,
+    units: [],
+    zones: [],
+    users: [],
+  });
+
   const [formOpen, setFormOpen] =
     useState(false);
+  const [values, setValues] =
+    useState(EMPTY_FORM);
 
-  const [formValues, setFormValues] =
-    useState(getInitialFormValues);
-
-  const [auditors, setAuditors] =
-    useState([]);
-
-  const [auditees, setAuditees] =
-    useState([]);
-
-  const [loading, setLoading] =
-    useState(true);
-
+  const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] =
     useState(false);
-
-  const [error, setError] =
+  const [error, setError] = useState("");
+  const [successMessage, setSuccessMessage] =
     useState("");
+  const [scheduledPatrol, setScheduledPatrol] =
+    useState(null);
 
-  const [
-    successMessage,
-    setSuccessMessage,
-  ] = useState("");
-
-  const [
-    scheduledPatrol,
-    setScheduledPatrol,
-  ] = useState(null);
-
-  const loadPlanningLookups =
-    useCallback(async () => {
-      setLoading(true);
-      setError("");
-
-      try {
-        const result =
-          await fetchPlanningLookups();
-
-        setAuditors(
-          Array.isArray(result?.auditors)
-            ? result.auditors
-            : [],
-        );
-
-        setAuditees(
-          Array.isArray(result?.auditees)
-            ? result.auditees
-            : [],
-        );
-      } catch (requestError) {
-        setAuditors([]);
-        setAuditees([]);
-
-        setError(
-          getErrorMessage(requestError),
-        );
-      } finally {
-        setLoading(false);
-      }
-    }, []);
-
-  useEffect(() => {
-    loadPlanningLookups();
-  }, [loadPlanningLookups]);
-
-  const openForm = useCallback(() => {
-    setFormOpen(true);
+  const load = useCallback(async () => {
+    setLoading(true);
     setError("");
-    setSuccessMessage("");
+
+    try {
+      const result =
+        await fetchPlanningLookups();
+
+      setLookups({
+        location: result?.location ?? null,
+        units: result?.units ?? [],
+        zones: result?.zones ?? [],
+        users: result?.users ?? [],
+      });
+    } catch (requestError) {
+      setError(getErrorMessage(requestError));
+
+      setLookups({
+        location: null,
+        units: [],
+        zones: [],
+        users: [],
+      });
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  const closeForm = useCallback(() => {
-    if (submitting) {
-      return;
-    }
+  useEffect(() => {
+    load();
+  }, [load]);
 
-    setFormOpen(false);
-    setError("");
-  }, [submitting]);
-
+  /*
+   * Each level narrows the next, so changing one resets everything
+   * below it. Without this a stale zone from a different unit could be
+   * submitted.
+   */
   const updateField = useCallback(
-    (fieldName, fieldValue) => {
+    (name, value) => {
       setError("");
       setSuccessMessage("");
 
-      setFormValues((currentValues) => {
-        switch (fieldName) {
-          case "location":
-            return {
-              ...currentValues,
-              location: fieldValue,
-            };
-
-          case "unit":
-            return {
-              ...currentValues,
-              unit: fieldValue,
-            };
-
-          case "zone":
-            return {
-              ...currentValues,
-              zone: fieldValue,
-            };
-
-          case "areaDetail":
-            return {
-              ...currentValues,
-              areaDetail: fieldValue,
-            };
-
-          case "scheduledDate":
-            return {
-              ...currentValues,
-              scheduledDate: fieldValue,
-            };
-
-          case "auditorId":
-            return {
-              ...currentValues,
-              auditorId: fieldValue,
-            };
-
-          case "auditeeId":
-            return {
-              ...currentValues,
-              auditeeId: fieldValue,
-            };
-
-          default:
-            return currentValues;
+      setValues((current) => {
+        if (name === "unitId") {
+          return {
+            ...current,
+            unitId: value,
+            zoneId: "",
+          };
         }
+
+        if (name === "auditorId") {
+          return {
+            ...current,
+            auditorId: value,
+            auditeeId:
+              current.auditeeId === value
+                ? ""
+                : current.auditeeId,
+          };
+        }
+
+        return { ...current, [name]: value };
       });
     },
     [],
   );
 
-  const validateForm =
-    useCallback(() => {
-      if (!formValues.location) {
-        return "Location is required.";
-      }
+  const zonesForUnit = lookups.zones.filter(
+    (zone) =>
+      String(zone.unitId) ===
+      String(values.unitId),
+  );
 
-      if (!formValues.unit) {
-        return "Unit is required.";
-      }
+  const selectedZone =
+    zonesForUnit.find(
+      (zone) =>
+        String(zone.id) ===
+        String(values.zoneId),
+    ) ?? null;
 
-      if (!formValues.zone) {
-        return "Zone is required.";
-      }
+  function validate() {
+    if (!values.unitId) {
+      return "Select the unit.";
+    }
 
-      if (!formValues.areaDetail) {
-        return "Area detail is required.";
-      }
+    if (!values.zoneId) {
+      return "Select the zone.";
+    }
 
-      if (!formValues.scheduledDate) {
-        return "Scheduled date is required.";
-      }
+    if (!values.scheduledDate) {
+      return "Select the audit date.";
+    }
 
-      const selectedDate =
-        new Date(
-          `${formValues.scheduledDate}T00:00:00`,
-        );
+    if (!values.auditorId) {
+      return "Select the auditor.";
+    }
 
-      if (
-        Number.isNaN(
-          selectedDate.getTime(),
-        )
-      ) {
-        return "Select a valid audit date.";
-      }
+    if (!values.auditeeId) {
+      return "Select the auditee.";
+    }
 
-      if (!formValues.auditorId) {
-        return "Select an auditor.";
-      }
+    if (
+      String(values.auditorId) ===
+      String(values.auditeeId)
+    ) {
+      return "The auditor and auditee must be different users.";
+    }
 
-      if (!formValues.auditeeId) {
-        return "Select an auditee.";
-      }
+    if (
+      (selectedZone?.areas ?? []).length === 0
+    ) {
+      return "The selected zone has no areas configured, so an audit cannot be scheduled for it.";
+    }
 
-      if (
-        String(formValues.auditorId) ===
-        String(formValues.auditeeId)
-      ) {
-        return (
-          "The auditor and auditee must " +
-          "be different users."
-        );
-      }
+    return "";
+  }
 
-      return "";
-    }, [formValues]);
+  const submit = useCallback(async () => {
+    if (submitting) {
+      return null;
+    }
 
-  const submitSchedule =
-    useCallback(async () => {
-      if (submitting) {
-        return null;
-      }
+    const validationError = validate();
 
-      setError("");
-      setSuccessMessage("");
+    if (validationError) {
+      setError(validationError);
+      return null;
+    }
 
-      const validationError =
-        validateForm();
+    setSubmitting(true);
+    setError("");
+    setSuccessMessage("");
 
-      if (validationError) {
-        setError(validationError);
-        return null;
-      }
+    try {
+      const result = await schedulePatrol(values);
 
-      setSubmitting(true);
+      setScheduledPatrol(
+        result?.patrol ?? null,
+      );
 
-      try {
-        const result =
-          await schedulePatrol({
-            location:
-              formValues.location,
+      setSuccessMessage(
+        result?.message ??
+          "Audit scheduled successfully.",
+      );
 
-            unit:
-              formValues.unit,
+      setValues(EMPTY_FORM);
+      setFormOpen(false);
 
-            zone:
-              formValues.zone,
-
-            areaDetail:
-              formValues.areaDetail,
-
-            scheduledDate:
-              formValues.scheduledDate,
-
-            auditorId:
-              Number(
-                formValues.auditorId,
-              ),
-
-            auditeeId:
-              Number(
-                formValues.auditeeId,
-              ),
-          });
-
-        const createdPatrol =
-          result?.patrol ?? null;
-
-        setScheduledPatrol(
-          createdPatrol,
-        );
-
-        setSuccessMessage(
-          result?.message ??
-            "Audit scheduled successfully.",
-        );
-
-        setFormValues(
-          getInitialFormValues(),
-        );
-
-        setFormOpen(false);
-
-        return result;
-      } catch (requestError) {
-        setError(
-          getErrorMessage(requestError),
-        );
-
-        return null;
-      } finally {
-        setSubmitting(false);
-      }
-    }, [
-      formValues,
-      submitting,
-      validateForm,
-    ]);
+      return result;
+    } catch (requestError) {
+      setError(getErrorMessage(requestError));
+      return null;
+    } finally {
+      setSubmitting(false);
+    }
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, [values, submitting, selectedZone]);
 
   return {
+    ...lookups,
+    zonesForUnit,
+    selectedZone,
+    values,
     formOpen,
-    formValues,
-    auditors,
-    auditees,
-    scheduledPatrol,
     loading,
     submitting,
     error,
     successMessage,
-
-    openForm,
-    closeForm,
+    scheduledPatrol,
+    openForm: () => setFormOpen(true),
+    closeForm: () => {
+      setFormOpen(false);
+      setValues(EMPTY_FORM);
+      setError("");
+    },
     updateField,
-    submitSchedule,
-    reloadLookups:
-      loadPlanningLookups,
+    submit,
+    reload: load,
   };
 }

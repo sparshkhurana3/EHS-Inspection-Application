@@ -9,8 +9,17 @@ CREATE TABLE IF NOT EXISTS roles (
 
 CREATE TABLE IF NOT EXISTS users (
     id BIGSERIAL PRIMARY KEY,
-    first_name VARCHAR(150) NOT NULL,
-    last_name VARCHAR(100) NOT NULL,
+
+    /*
+     * The application stores one display name and a separate login
+     * username. Earlier revisions of this file declared first_name and
+     * last_name, which contradicted the users_username_lower_unique
+     * index below and made this migration fail on an empty database.
+     * These two columns match the deployed schema.
+     */
+    full_name VARCHAR(150) NOT NULL,
+    username VARCHAR(100) NOT NULL,
+
     email VARCHAR(255) NOT NULL,
     password_hash VARCHAR(255),
     authentication_source VARCHAR(30)

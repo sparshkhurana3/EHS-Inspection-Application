@@ -2,8 +2,13 @@ import {
   NavLink,
 } from "react-router-dom";
 
-import useAuth
-  from "../features/auth/useAuth.js";
+import {
+  useAuthenticatedUser,
+} from "../app/authProvider.jsx";
+
+import {
+  canPlanAudits,
+} from "../constants/roles.js";
 
 const NAVIGATION_ITEMS = [
   {
@@ -23,88 +28,13 @@ const NAVIGATION_ITEMS = [
   },
 ];
 
-function normalizeRole(role) {
-  if (typeof role === "string") {
-    return role
-      .trim()
-      .toUpperCase();
-  }
-
-  return String(
-    role?.code ??
-    role?.roleCode ??
-    role?.role_code ??
-    role?.name ??
-    role?.role ??
-    "",
-  )
-    .trim()
-    .toUpperCase();
-}
-
-function normalizeRoles(roleValue) {
-  if (Array.isArray(roleValue)) {
-    return roleValue
-      .map(normalizeRole)
-      .filter(Boolean);
-  }
-
-  if (typeof roleValue === "string") {
-    return roleValue
-      .split(",")
-      .map((role) => {
-        return role
-          .trim()
-          .toUpperCase();
-      })
-      .filter(Boolean);
-  }
-
-  return [];
-}
-
-function getUserRoles(user) {
-  const allRoles = [
-    ...normalizeRoles(user?.roles),
-    ...normalizeRoles(user?.roleCodes),
-    ...normalizeRoles(user?.role_codes),
-    ...normalizeRoles(user?.appRoles),
-    ...normalizeRoles(user?.app_roles),
-    ...normalizeRoles(user?.role),
-  ];
-
-  return [
-    ...new Set(allRoles),
-  ];
-}
-
-function hasRole(
-  user,
-  requiredRole,
-) {
-  const normalizedRequiredRole =
-    String(requiredRole ?? "")
-      .trim()
-      .toUpperCase();
-
-  return getUserRoles(user).includes(
-    normalizedRequiredRole,
-  );
-}
-
-function getNavigationClassName({
-  isActive,
-}) {
+function getNavigationClassName({ isActive }) {
   return isActive
     ? "sidebar-link sidebar-link-active"
     : "sidebar-link";
 }
 
-function SidebarLink({
-  label,
-  path,
-  icon,
-}) {
+function SidebarLink({ label, path, icon }) {
   return (
     <NavLink
       to={path}
@@ -123,12 +53,15 @@ function SidebarLink({
 }
 
 export default function Sidebar() {
-  const {
-    user,
-  } = useAuth();
+  /*
+   * The signed-in user comes from the auth context. This used to read
+   * features/auth/useAuth.js, the sign-in form hook, which never
+   * returns a user, so the Plan link was hardcoded visible to everyone.
+   */
+  const { user } = useAuthenticatedUser();
 
-  const canPlanAudits =
-    true;
+  const showPlanLink = canPlanAudits(user);
+
   return (
     <aside className="app-sidebar">
       <div className="sidebar-brand">
@@ -140,13 +73,8 @@ export default function Sidebar() {
         </span>
 
         <div className="sidebar-brand-text">
-          <strong>
-            EHS Inspection
-          </strong>
-
-          <span>
-            Safety management
-          </span>
+          <strong>EHS Inspection</strong>
+          <span>Safety management</span>
         </div>
       </div>
 
@@ -154,22 +82,14 @@ export default function Sidebar() {
         className="sidebar-navigation"
         aria-label="Primary navigation"
       >
-        {NAVIGATION_ITEMS.map(
-          ({
-            label,
-            path,
-            icon,
-          }) => (
-            <SidebarLink
-              key={path}
-              label={label}
-              path={path}
-              icon={icon}
-            />
-          ),
-        )}
+        {NAVIGATION_ITEMS.map((item) => (
+          <SidebarLink
+            key={item.path}
+            {...item}
+          />
+        ))}
 
-        {canPlanAudits && (
+        {showPlanLink && (
           <SidebarLink
             label="Plan"
             path="/plan"
@@ -179,13 +99,8 @@ export default function Sidebar() {
       </nav>
 
       <div className="sidebar-footer">
-        <span>
-          Environmental Health
-        </span>
-
-        <span>
-          and Safety Tool
-        </span>
+        <span>Environmental Health</span>
+        <span>and Safety Tool</span>
       </div>
     </aside>
   );

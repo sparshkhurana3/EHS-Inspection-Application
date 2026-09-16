@@ -7,16 +7,13 @@ import {
 } from "../../middleware/authenticate.js";
 
 import {
-  authorize,
-} from "../../middleware/authorize.js";
-
-import {
   validate,
 } from "../../middleware/validate.js";
 
 import {
   createObservation,
-  getCurrentAssignment,
+  getWeeklyAssignments,
+  getObservationReport,
   getObservationPhotograph,
 } from "./observation.controller.js";
 
@@ -35,14 +32,24 @@ const router = Router();
 router.get(
   "/current-assignments",
   authenticate,
-  authorize("USER"),
-  getCurrentAssignments,
+  getWeeklyAssignments,
+);
+
+/*
+ * Registered before the parameterised routes below so the literal path
+ * is matched first.
+ */
+router.get(
+  "/:reportId",
+  authenticate,
+  observationReportIdValidationRules,
+  validate,
+  getObservationReport,
 );
 
 router.get(
   "/:reportId/photograph",
   authenticate,
-  authorize("USER"),
   observationReportIdValidationRules,
   validate,
   getObservationPhotograph,
@@ -51,7 +58,6 @@ router.get(
 router.post(
   "/",
   authenticate,
-  authorize("USER"),
   uploadObservationPhotograph,
   handleObservationUploadError,
   createObservationValidationRules,

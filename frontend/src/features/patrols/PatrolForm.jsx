@@ -1,446 +1,301 @@
-const LOCATION_OPTIONS = [
-  "Gurugram",
-  "Manesar",
-  "Chennai",
-  "Pune",
-  "China",
-];
-
-const UNIT_OPTIONS = [
-  {
-    value: "1",
-    label: "Unit I",
-  },
-  {
-    value: "2",
-    label: "Unit II",
-  },
-  {
-    value: "3",
-    label: "Unit III",
-  },
-  {
-    value: "4",
-    label: "Unit IV",
-  },
-  {
-    value: "5",
-    label: "Unit V",
-  },
-];
-
-const ZONE_OPTIONS = [
-  "1",
-  "2",
-  "3",
-  "4",
-  "5",
-  "6",
-  "7",
-  "8",
-  "9",
-];
-
-const AREA_DETAIL_OPTIONS = [
-  "ETP area",
-  "Maintenance Store",
-  "Utility",
-  "Forge Shop",
-  "Machine shop",
-  "Heat Treatment",
-  "Die Shop",
-  "Tool Shop",
-  "OSP Store",
-];
-
-function getTodayValue() {
-  const currentDate = new Date();
-
-  const year =
-    currentDate.getFullYear();
-
-  const month =
-    String(
-      currentDate.getMonth() + 1,
-    ).padStart(2, "0");
-
-  const day =
-    String(
-      currentDate.getDate(),
-    ).padStart(2, "0");
-
-  return `${year}-${month}-${day}`;
+function todayValue() {
+  return new Date().toISOString().slice(0, 10);
 }
 
-function getUserLabel(user) {
-  const fullName =
-    user.fullName ??
-    user.full_name ??
-    user.name ??
-    "";
+function userLabel(user) {
+  const name =
+    user.fullName ?? user.username ?? `User ${user.id}`;
 
-  const username =
-    user.username ?? "";
-
-  if (fullName && username) {
-    return `${fullName} (${username})`;
-  }
-
-  return (
-    fullName ||
-    username ||
-    `User ${user.id}`
-  );
+  return user.fullName && user.username
+    ? `${user.fullName} (${user.username})`
+    : name;
 }
 
+/**
+ * Every option here comes from the API, scoped to the officer's own
+ * location. Nothing is hardcoded: adding a unit, zone or area in the
+ * database is enough for it to appear.
+ */
 export default function PatrolForm({
-  formValues,
-  auditors,
-  auditees,
+  location,
+  units,
+  zonesForUnit,
+  selectedZone,
+  users,
+  values,
   submitting,
   onFieldChange,
   onSubmit,
   onCancel,
 }) {
-  function updateField(
-    fieldName,
-    event,
-  ) {
-    if (
-      typeof onFieldChange === "function"
-    ) {
-      onFieldChange(
-        fieldName,
-        event.target.value,
-      );
-    }
-  }
+  const areas = selectedZone?.areas ?? [];
+
+  const auditeeOptions = users.filter(
+    (user) =>
+      String(user.id) !==
+      String(values.auditorId),
+  );
 
   function handleSubmit(event) {
     event.preventDefault();
-
-    if (
-      typeof onSubmit === "function"
-    ) {
-      onSubmit();
-    }
+    onSubmit();
   }
 
   return (
-    <form
-      className="patrol-planning-form"
-      onSubmit={handleSubmit}
-      noValidate
-    >
-      <div className="patrol-planning-form-header">
+    <section className="patrol-form-card">
+      <header className="observation-section-header">
         <div>
-          <span className="dashboard-eyebrow">
-            New patrol assignment
-          </span>
-
-          <h2>Schedule an Audit</h2>
+          <h2>Schedule an audit</h2>
 
           <p>
-            Select the audit location, work
-            area, date, auditor, and auditee.
+            Location:{" "}
+            {location?.name ?? "Not set"}
           </p>
         </div>
 
         <button
           type="button"
-          className="patrol-planning-close"
+          className="button button-secondary"
           onClick={onCancel}
-          disabled={submitting}
-          aria-label="Close scheduling form"
+          aria-label="Close the scheduling form"
         >
           ×
         </button>
-      </div>
+      </header>
 
-      <div className="patrol-planning-grid">
-        <div className="patrol-form-field">
-          <label htmlFor="patrol-location">
-            Location
-            <span aria-hidden="true">
-              {" "}*
-            </span>
-          </label>
-
-          <select
-            id="patrol-location"
-            value={formValues.location}
-            onChange={(event) => {
-              updateField(
-                "location",
-                event,
-              );
-            }}
-            disabled={submitting}
-            required
-          >
-            <option value="">
-              Select location
-            </option>
-
-            {LOCATION_OPTIONS.map(
-              (location) => (
-                <option
-                  key={location}
-                  value={location}
-                >
-                  {location}
-                </option>
-              ),
-            )}
-          </select>
-        </div>
-
-        <div className="patrol-form-field">
-          <label htmlFor="patrol-unit">
-            Unit
-            <span aria-hidden="true">
-              {" "}*
-            </span>
-          </label>
-
-          <select
-            id="patrol-unit"
-            value={formValues.unit}
-            onChange={(event) => {
-              updateField(
-                "unit",
-                event,
-              );
-            }}
-            disabled={submitting}
-            required
-          >
-            <option value="">
-              Select unit
-            </option>
-
-            {UNIT_OPTIONS.map(
-              (unit) => (
-                <option
-                  key={unit.value}
-                  value={unit.value}
-                >
-                  {unit.label}
-                </option>
-              ),
-            )}
-          </select>
-        </div>
-
-        <div className="patrol-form-field">
-          <label htmlFor="patrol-zone">
-            Zone
-            <span aria-hidden="true">
-              {" "}*
-            </span>
-          </label>
-
-          <select
-            id="patrol-zone"
-            value={formValues.zone}
-            onChange={(event) => {
-              updateField(
-                "zone",
-                event,
-              );
-            }}
-            disabled={submitting}
-            required
-          >
-            <option value="">
-              Select zone
-            </option>
-
-            {ZONE_OPTIONS.map(
-              (zone) => (
-                <option
-                  key={zone}
-                  value={zone}
-                >
-                  Zone {zone}
-                </option>
-              ),
-            )}
-          </select>
-        </div>
-
-        <div className="patrol-form-field">
-          <label htmlFor="patrol-area-detail">
-            Area detail
-            <span aria-hidden="true">
-              {" "}*
-            </span>
-          </label>
-
-          <select
-            id="patrol-area-detail"
-            value={formValues.areaDetail}
-            onChange={(event) => {
-              updateField(
-                "areaDetail",
-                event,
-              );
-            }}
-            disabled={submitting}
-            required
-          >
-            <option value="">
-              Select area
-            </option>
-
-            {AREA_DETAIL_OPTIONS.map(
-              (areaDetail) => (
-                <option
-                  key={areaDetail}
-                  value={areaDetail}
-                >
-                  {areaDetail}
-                </option>
-              ),
-            )}
-          </select>
-        </div>
-
-        <div className="patrol-form-field">
-          <label htmlFor="patrol-scheduled-date">
-            Scheduled date
-            <span aria-hidden="true">
-              {" "}*
-            </span>
+      <form noValidate onSubmit={handleSubmit}>
+        <div className="form-field">
+          <label htmlFor="scheduledDate">
+            Audit date
           </label>
 
           <input
-            id="patrol-scheduled-date"
+            id="scheduledDate"
             type="date"
-            min={getTodayValue()}
-            value={
-              formValues.scheduledDate
-            }
-            onChange={(event) => {
-              updateField(
-                "scheduledDate",
-                event,
-              );
-            }}
+            min={todayValue()}
+            value={values.scheduledDate}
             disabled={submitting}
-            required
+            onChange={(event) =>
+              onFieldChange(
+                "scheduledDate",
+                event.target.value,
+              )
+            }
           />
         </div>
 
-        <div className="patrol-form-field">
-          <label htmlFor="patrol-auditor">
-            Auditor name
-            <span aria-hidden="true">
-              {" "}*
-            </span>
-          </label>
+        <div className="form-field">
+          <label htmlFor="unitId">Unit</label>
+
+          {units.length === 0 ? (
+            <p className="closure-empty-note">
+              No units are configured for this
+              location.
+            </p>
+          ) : (
+            <select
+              id="unitId"
+              value={values.unitId}
+              disabled={submitting}
+              onChange={(event) =>
+                onFieldChange(
+                  "unitId",
+                  event.target.value,
+                )
+              }
+            >
+              <option value="">
+                Select the unit
+              </option>
+
+              {units.map((unit) => (
+                <option
+                  key={unit.id}
+                  value={unit.id}
+                >
+                  {unit.name}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+
+        <div className="form-field">
+          <label htmlFor="zoneId">Zone</label>
 
           <select
-            id="patrol-auditor"
-            value={formValues.auditorId}
-            onChange={(event) => {
-              updateField(
-                "auditorId",
-                event,
-              );
-            }}
-            disabled={submitting}
-            required
+            id="zoneId"
+            value={values.zoneId}
+            disabled={
+              submitting || !values.unitId
+            }
+            onChange={(event) =>
+              onFieldChange(
+                "zoneId",
+                event.target.value,
+              )
+            }
           >
             <option value="">
-              Select auditor
+              {values.unitId
+                ? "Select the zone"
+                : "Select a unit first"}
             </option>
 
-            {auditors.map((user) => (
+            {zonesForUnit.map((zone) => (
               <option
-                key={user.id}
-                value={user.id}
+                key={zone.id}
+                value={zone.id}
               >
-                {getUserLabel(user)}
+                {zone.name}
               </option>
             ))}
           </select>
 
-          {auditors.length === 0 && (
-            <small>
-              No users with the Auditor role
-              are available.
-            </small>
+          {values.unitId &&
+          zonesForUnit.length === 0 ? (
+            <p className="closure-empty-note">
+              No zones are configured for this
+              unit.
+            </p>
+          ) : null}
+        </div>
+
+        {/*
+          * A patrol covers the whole zone, so the areas are shown as
+          * confirmation of what the auditor will walk rather than
+          * being chosen here. The auditor names the specific area when
+          * filing the observation.
+          */}
+        <div className="form-field">
+          <span id="area-details-label">
+            Area details
+          </span>
+
+          {selectedZone ? (
+            areas.length > 0 ? (
+              <ul
+                className="patrol-area-list"
+                aria-labelledby="area-details-label"
+              >
+                {areas.map((area) => (
+                  <li key={area.id}>
+                    {area.name}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="closure-empty-note">
+                No areas are configured for this
+                zone, so an audit cannot be
+                scheduled for it.
+              </p>
+            )
+          ) : (
+            <p className="closure-empty-note">
+              Select a zone to see its areas.
+            </p>
           )}
         </div>
 
-        <div className="patrol-form-field">
-          <label htmlFor="patrol-auditee">
-            Auditee name
-            <span aria-hidden="true">
-              {" "}*
-            </span>
+        <div className="form-field">
+          <label htmlFor="auditorId">
+            Auditor
+          </label>
+
+          {users.length === 0 ? (
+            <p className="closure-empty-note">
+              No other users are registered at
+              this location.
+            </p>
+          ) : (
+            <select
+              id="auditorId"
+              value={values.auditorId}
+              disabled={submitting}
+              onChange={(event) =>
+                onFieldChange(
+                  "auditorId",
+                  event.target.value,
+                )
+              }
+            >
+              <option value="">
+                Select the auditor
+              </option>
+
+              {users.map((user) => (
+                <option
+                  key={user.id}
+                  value={user.id}
+                >
+                  {userLabel(user)}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+
+        <div className="form-field">
+          <label htmlFor="auditeeId">
+            Auditee
           </label>
 
           <select
-            id="patrol-auditee"
-            value={formValues.auditeeId}
-            onChange={(event) => {
-              updateField(
+            id="auditeeId"
+            value={values.auditeeId}
+            disabled={
+              submitting || !values.auditorId
+            }
+            onChange={(event) =>
+              onFieldChange(
                 "auditeeId",
-                event,
-              );
-            }}
-            disabled={submitting}
-            required
+                event.target.value,
+              )
+            }
           >
             <option value="">
-              Select auditee
+              {values.auditorId
+                ? "Select the auditee"
+                : "Select an auditor first"}
             </option>
 
-            {auditees.map((user) => (
+            {auditeeOptions.map((user) => (
               <option
                 key={user.id}
                 value={user.id}
               >
-                {getUserLabel(user)}
+                {userLabel(user)}
               </option>
             ))}
           </select>
-
-          {auditees.length === 0 && (
-            <small>
-              No users with the Auditee role
-              are available.
-            </small>
-          )}
         </div>
-      </div>
 
-      <div className="patrol-planning-actions">
-        <button
-          type="button"
-          className="button button-secondary"
-          onClick={onCancel}
-          disabled={submitting}
-        >
-          Cancel
-        </button>
+        <div className="closure-form-actions">
+          <button
+            type="button"
+            className="button button-secondary"
+            onClick={onCancel}
+            disabled={submitting}
+          >
+            Cancel
+          </button>
 
-        <button
-          type="submit"
-          className="button button-primary"
-          disabled={
-            submitting ||
-            auditors.length === 0 ||
-            auditees.length === 0
-          }
-        >
-          {submitting
-            ? "Scheduling Audit..."
-            : "Schedule Audit"}
-        </button>
-      </div>
-    </form>
+          <button
+            type="submit"
+            className="button button-primary"
+            disabled={
+              submitting ||
+              units.length === 0 ||
+              users.length === 0
+            }
+          >
+            {submitting
+              ? "Scheduling..."
+              : "Schedule audit"}
+          </button>
+        </div>
+      </form>
+    </section>
   );
 }

@@ -1,21 +1,36 @@
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL ??
-  "http://localhost:3000/api";
+  "/api";
 
-const ACCESS_TOKEN_KEY =
+export const ACCESS_TOKEN_KEY =
   "ehs_access_token";
 
-function createHeaders({
-  body,
-  headers,
-}) {
-  const requestHeaders =
-    new Headers(headers);
+export const USER_STORAGE_KEY = "ehs_user";
 
-  const accessToken =
-    localStorage.getItem(
+/*
+ * Notified when a request comes back 401 so the session can be cleared
+ * once, centrally, instead of every page inventing its own handling.
+ */
+let onUnauthorized = null;
+
+export function setUnauthorizedHandler(handler) {
+  onUnauthorized = handler;
+}
+
+function readToken() {
+  try {
+    return localStorage.getItem(
       ACCESS_TOKEN_KEY,
     );
+  } catch {
+    return null;
+  }
+}
+
+function createHeaders({ body, headers }) {
+  const requestHeaders = new Headers(headers);
+
+  const accessToken = readToken();
 
   if (accessToken) {
     requestHeaders.set(
@@ -30,8 +45,8 @@ function createHeaders({
   );
 
   /*
-   * The browser must create the multipart boundary
-   * automatically for FormData requests.
+   * The browser must set the multipart boundary itself, so never force
+   * a content type on FormData.
    */
   if (
     body !== undefined &&
@@ -50,25 +65,16 @@ function createHeaders({
 
 async function readResponse(response) {
   const contentType =
-    response.headers.get(
-      "content-type",
-    ) ?? "";
+    response.headers.get("content-type") ?? "";
 
-  if (
-    contentType.includes(
-      "application/json",
-    )
-  ) {
+  if (contentType.includes("application/json")) {
     return response.json();
   }
 
-  const responseText =
-    await response.text();
+  const responseText = await response.text();
 
   return responseText
-    ? {
-        message: responseText,
-      }
+    ? { message: responseText }
     : {};
 }
 
@@ -80,37 +86,43 @@ async function createApiError(
     await readResponse(response);
 
   const error = new Error(
-    responseData?.message ??
-      fallbackMessage,
+    responseData?.message ?? fallbackMessage,
   );
 
   error.status = response.status;
   error.code = responseData?.code;
-  error.details =
-    responseData?.details;
+  error.details = responseData?.details;
 
   return error;
+}
+
+function handleUnauthorized(response) {
+  if (
+    response.status === 401 &&
+    typeof onUnauthorized === "function"
+  ) {
+    onUnauthorized();
+  }
 }
 
 export async function apiRequest(
   endpoint,
   options = {},
 ) {
-  const requestOptions = {
-    ...options,
-
-    headers: createHeaders({
-      body: options.body,
-      headers: options.headers,
-    }),
-  };
-
   const response = await fetch(
     `${API_BASE_URL}${endpoint}`,
-    requestOptions,
+    {
+      ...options,
+      headers: createHeaders({
+        body: options.body,
+        headers: options.headers,
+      }),
+    },
   );
 
   if (!response.ok) {
+    handleUnauthorized(response);
+
     throw await createApiError(
       response,
       "The API request failed.",
@@ -118,4 +130,36 @@ export async function apiRequest(
   }
 
   return readResponse(response);
+}
+
+/**
+ * For endpoints that return bytes rather than JSON, such as an
+ * observation photograph, which is served through an authenticated
+ * route and so cannot be used as a plain image src.
+ */
+export async function apiBlobRequest(
+  endpoint,
+  options = {},
+) {
+  const response = await fetch(
+    `${API_BASE_URL}${endpoint}`,
+    {
+      ...options,
+      headers: createHeaders({
+        body: options.body,
+        headers: options.headers,
+      }),
+    },
+  );
+
+  if (!response.ok) {
+    handleUnauthorized(response);
+
+    throw await createApiError(
+      response,
+      "The file could not be loaded.",
+    );
+  }
+
+  return response.blob();
 }

@@ -1,4 +1,11 @@
+import fs from "node:fs";
+import path from "node:path";
+
 import app from "./app.js";
+
+import {
+  runMigrations,
+} from "../scripts/migrate.js";
 
 import {
   environment,
@@ -17,6 +24,20 @@ let server;
 
 async function startServer() {
   try {
+    /*
+     * multer's diskStorage destination callback does not create the
+     * directory, so an image upload fails if it is missing. Creating it
+     * here keeps the app working regardless of how it was deployed.
+     */
+    fs.mkdirSync(
+      path.resolve(
+        process.cwd(),
+        "uploads",
+        "observations",
+      ),
+      { recursive: true },
+    );
+
     const databaseStatus =
       await verifyDatabaseConnection();
 
@@ -27,6 +48,8 @@ async function startServer() {
           databaseStatus.database_time,
       },
     );
+
+    await runMigrations();
 
     server = app.listen(
       environment.port,

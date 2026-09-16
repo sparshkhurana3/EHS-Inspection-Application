@@ -75,7 +75,10 @@ export default function PhotographInput({
 
       {photographPreview ? (
         <div className="observation-photo-preview">
-          {photographPreview}
+          <img
+            src={photographPreview}
+            alt="Selected observation photograph"
+          />
 
           <div className="observation-photo-actions">
             <button

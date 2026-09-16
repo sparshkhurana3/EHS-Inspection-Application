@@ -2,25 +2,45 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
 } from "react";
 
-const ACCESS_TOKEN_KEY = "ehs_access_token";
-const USER_STORAGE_KEY = "ehs_user";
+import {
+  ACCESS_TOKEN_KEY,
+  USER_STORAGE_KEY,
+  setUnauthorizedHandler,
+} from "../services/apiClient.js";
 
 const AuthContext = createContext(null);
 
 function readStoredUser() {
   try {
-    const storedUser =
-      localStorage.getItem(USER_STORAGE_KEY);
+    const storedUser = localStorage.getItem(
+      USER_STORAGE_KEY,
+    );
 
     return storedUser
       ? JSON.parse(storedUser)
       : null;
   } catch {
-    localStorage.removeItem(USER_STORAGE_KEY);
+    try {
+      localStorage.removeItem(USER_STORAGE_KEY);
+    } catch {
+      /* storage unavailable; nothing to clean up */
+    }
+
+    return null;
+  }
+}
+
+function readStoredToken() {
+  try {
+    return localStorage.getItem(
+      ACCESS_TOKEN_KEY,
+    );
+  } catch {
     return null;
   }
 }
@@ -30,50 +50,72 @@ export function AuthProvider({ children }) {
     readStoredUser,
   );
 
+  /*
+   * The token is held in state as well as storage so that
+   * isAuthenticated reacts to a sign-out, including one triggered by a
+   * 401 from any request.
+   */
+  const [token, setToken] = useState(
+    readStoredToken,
+  );
+
   const setAuthenticatedUser = useCallback(
     (authenticatedUser, accessToken) => {
-      if (accessToken) {
-        localStorage.setItem(
-          ACCESS_TOKEN_KEY,
-          accessToken,
-        );
+      try {
+        if (accessToken) {
+          localStorage.setItem(
+            ACCESS_TOKEN_KEY,
+            accessToken,
+          );
+        }
+
+        if (authenticatedUser) {
+          localStorage.setItem(
+            USER_STORAGE_KEY,
+            JSON.stringify(authenticatedUser),
+          );
+        }
+      } catch {
+        /* private mode: keep the session in memory only */
       }
 
-      if (authenticatedUser) {
-        localStorage.setItem(
-          USER_STORAGE_KEY,
-          JSON.stringify(authenticatedUser),
-        );
-      }
-
+      setToken(accessToken ?? readStoredToken());
       setUser(authenticatedUser);
     },
     [],
   );
 
   const logout = useCallback(() => {
-    localStorage.removeItem(ACCESS_TOKEN_KEY);
-    localStorage.removeItem(USER_STORAGE_KEY);
+    try {
+      localStorage.removeItem(ACCESS_TOKEN_KEY);
+      localStorage.removeItem(USER_STORAGE_KEY);
+    } catch {
+      /* nothing to clean up */
+    }
+
+    setToken(null);
     setUser(null);
   }, []);
+
+  /*
+   * An expired token used to leave the user inside the app watching
+   * every page fail. Clearing the session on any 401 sends them back to
+   * sign-in once.
+   */
+  useEffect(() => {
+    setUnauthorizedHandler(() => logout());
+
+    return () => setUnauthorizedHandler(null);
+  }, [logout]);
 
   const value = useMemo(
     () => ({
       user,
-      isAuthenticated: Boolean(
-        user &&
-          localStorage.getItem(
-            ACCESS_TOKEN_KEY,
-          ),
-      ),
+      isAuthenticated: Boolean(user && token),
       setAuthenticatedUser,
       logout,
     }),
-    [
-      logout,
-      setAuthenticatedUser,
-      user,
-    ],
+    [user, token, setAuthenticatedUser, logout],
   );
 
   return (

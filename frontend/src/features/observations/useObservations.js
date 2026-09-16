@@ -7,13 +7,17 @@ import {
 
 import {
   createObservationReport,
-  fetchCurrentObservationAssignment,
+  fetchObservationPhotograph,
+  fetchObservationReport,
+  fetchWeeklyAssignments,
 } from "./observation.service.js";
 
-const MAX_IMAGE_SIZE =
-  10 * 1024 * 1024;
+import {
+  getErrorMessage,
+} from "../../lib/errorMessage.js";
 
-const MAX_DESCRIPTION_WORDS = 500;
+export const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
+export const MAX_DESCRIPTION_WORDS = 500;
 
 const ALLOWED_IMAGE_TYPES = new Set([
   "image/jpeg",
@@ -21,17 +25,86 @@ const ALLOWED_IMAGE_TYPES = new Set([
   "image/svg+xml",
 ]);
 
-const PERMITTED_FORM_FIELDS = new Set([
-  "findingDate",
-  "location",
-  "category",
-  "description",
-  "riskCategory",
-]);
+function todayValue() {
+  return new Date().toISOString().slice(0, 10);
+}
 
-const INITIAL_FORM_VALUES = {
+export function countWords(value) {
+  const trimmed = String(value ?? "").trim();
+
+  return trimmed
+    ? trimmed.split(/\s+/).filter(Boolean).length
+    : 0;
+}
+
+/**
+ * The auditor's week: every patrol they are auditing, split into the
+ * ones still needing a report and the ones already filed.
+ */
+export function useWeeklyObservations() {
+  const [data, setData] = useState({
+    assignments: [],
+    pendingCount: 0,
+    submittedCount: 0,
+    weekStartDate: null,
+    weekEndDate: null,
+  });
+
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError("");
+
+    try {
+      const result =
+        await fetchWeeklyAssignments();
+
+      setData({
+        assignments: Array.isArray(
+          result?.assignments,
+        )
+          ? result.assignments
+          : [],
+        pendingCount: result?.pendingCount ?? 0,
+        submittedCount:
+          result?.submittedCount ?? 0,
+        weekStartDate: result?.weekStartDate,
+        weekEndDate: result?.weekEndDate,
+      });
+    } catch (requestError) {
+      setError(getErrorMessage(requestError));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const pending = data.assignments.filter(
+    (assignment) => !assignment.report,
+  );
+
+  const submitted = data.assignments.filter(
+    (assignment) => assignment.report,
+  );
+
+  return {
+    ...data,
+    pending,
+    submitted,
+    loading,
+    error,
+    reload: load,
+  };
+}
+
+const EMPTY_FORM = {
   findingDate: "",
-  location: "",
+  zoneAreaId: "",
   category: "",
   photograph: null,
   photographPreview: "",
@@ -39,523 +112,293 @@ const INITIAL_FORM_VALUES = {
   riskCategory: "",
 };
 
-function getLocalDateValue() {
-  const date = new Date();
-
-  const year =
-    date.getFullYear();
-
-  const month =
-    String(date.getMonth() + 1)
-      .padStart(2, "0");
-
-  const day =
-    String(date.getDate())
-      .padStart(2, "0");
-
-  return `${year}-${month}-${day}`;
-}
-
-function countWords(value) {
-  const trimmedValue =
-    String(value ?? "").trim();
-
-  if (!trimmedValue) {
-    return 0;
-  }
-
-  return trimmedValue
-    .split(/\s+/)
-    .filter(Boolean)
-    .length;
-}
-
-function getErrorMessage(error) {
-  if (
-    error instanceof TypeError &&
-    error.message === "Failed to fetch"
-  ) {
-    return (
-      "Unable to connect to the EHS API. " +
-      "Check that the backend is running."
-    );
-  }
-
-  if (
-    Array.isArray(error?.details) &&
-    error.details.length > 0
-  ) {
-    return error.details
-      .map((detail) => detail.message)
-      .filter(Boolean)
-      .join(" ");
-  }
-
-  return (
-    error?.message ??
-    "An unexpected observation error occurred."
-  );
-}
-
-function revokePreview(previewUrl) {
-  if (previewUrl) {
-    URL.revokeObjectURL(previewUrl);
-  }
-}
-
-export default function useObservations() {
-  const [
-    assignment,
-    setAssignment,
-  ] = useState(null);
-
-  const [
-    existingReport,
-    setExistingReport,
-  ] = useState(null);
-
-  const [
-    formValues,
-    setFormValues,
-  ] = useState({
-    ...INITIAL_FORM_VALUES,
-    findingDate: getLocalDateValue(),
-  });
-
-  const [loading, setLoading] =
-    useState(true);
+/**
+ * Form state for one assignment. Keyed to that assignment so switching
+ * between patrols cannot carry a half-filled report across.
+ */
+export function useObservationForm(assignment) {
+  const [values, setValues] = useState(() => ({
+    ...EMPTY_FORM,
+    findingDate: todayValue(),
+  }));
 
   const [submitting, setSubmitting] =
     useState(false);
+  const [error, setError] = useState("");
 
-  const [error, setError] =
-    useState("");
-
-  const [
-    successMessage,
-    setSuccessMessage,
-  ] = useState("");
-
-  const photographPreviewRef =
-    useRef("");
-
-  const loadCurrentAssignment =
-    useCallback(async () => {
-      setLoading(true);
-      setError("");
-      setSuccessMessage("");
-
-      try {
-        const result =
-          await fetchCurrentObservationAssignment();
-
-        const currentAssignment =
-          result?.assignment ?? null;
-
-        const currentReport =
-          result?.report ?? null;
-
-        setAssignment(currentAssignment);
-        setExistingReport(currentReport);
-
-        setFormValues((currentValues) => ({
-          ...currentValues,
-
-          findingDate:
-            currentValues.findingDate ||
-            getLocalDateValue(),
-
-          location:
-            currentAssignment?.plantLocation ??
-            currentAssignment?.plant_location ??
-            currentValues.location,
-        }));
-      } catch (requestError) {
-        setAssignment(null);
-        setExistingReport(null);
-
-        setError(
-          getErrorMessage(requestError),
-        );
-      } finally {
-        setLoading(false);
-      }
-    }, []);
+  const previewRef = useRef("");
 
   useEffect(() => {
-    loadCurrentAssignment();
-  }, [loadCurrentAssignment]);
+    previewRef.current =
+      values.photographPreview;
+  }, [values.photographPreview]);
 
+  /* Reset when the assignment changes, and release the object URL. */
   useEffect(() => {
-    photographPreviewRef.current =
-      formValues.photographPreview;
-  }, [formValues.photographPreview]);
-
-  useEffect(() => {
-    return () => {
-      revokePreview(
-        photographPreviewRef.current,
-      );
-    };
-  }, []);
-
-  /**
-   * Updates a text, date, or dropdown field.
-   */
-  const updateField = useCallback(
-  (fieldName, fieldValue) => {
-    setError("");
-    setSuccessMessage("");
-
-    if (fieldName === "description") {
-      const wordCount =
-        countWords(fieldValue);
-
-      if (
-        wordCount >
-        MAX_DESCRIPTION_WORDS
-      ) {
-        setError(
-          `Observation description cannot exceed ${MAX_DESCRIPTION_WORDS} words.`,
-        );
-
-        return;
-      }
+    if (previewRef.current) {
+      URL.revokeObjectURL(previewRef.current);
     }
 
-    setFormValues((currentValues) => {
-      switch (fieldName) {
-        case "findingDate":
-          return {
-            ...currentValues,
-            findingDate: fieldValue,
-          };
-
-        case "location":
-          return {
-            ...currentValues,
-            location: fieldValue,
-          };
-
-        case "category":
-          return {
-            ...currentValues,
-            category: fieldValue,
-          };
-
-        case "description":
-          return {
-            ...currentValues,
-            description: fieldValue,
-          };
-
-        case "riskCategory":
-          return {
-            ...currentValues,
-            riskCategory: fieldValue,
-          };
-
-        default:
-          setError(
-            `The field "${fieldName}" cannot be updated.`,
-          );
-
-          return currentValues;
-      }
+    setValues({
+      ...EMPTY_FORM,
+      findingDate: todayValue(),
     });
-  },
-  [],
-  );
 
-  /**
-   * Validates and stores the selected photograph.
-   */
-  const updatePhotograph = useCallback(
-    (file) => {
-      setError("");
-      setSuccessMessage("");
+    setError("");
+  }, [assignment?.id]);
 
-      if (!file) {
-        return;
+  useEffect(
+    () => () => {
+      if (previewRef.current) {
+        URL.revokeObjectURL(previewRef.current);
       }
-
-      if (
-        !ALLOWED_IMAGE_TYPES.has(
-          file.type,
-        )
-      ) {
-        setError(
-          "Only JPG, JPEG, PNG, or SVG images are allowed.",
-        );
-
-        return;
-      }
-
-      if (file.size > MAX_IMAGE_SIZE) {
-        setError(
-          "The observation photograph must be 10 MB or smaller.",
-        );
-
-        return;
-      }
-
-      setFormValues(
-        (currentValues) => {
-          revokePreview(
-            currentValues
-              .photographPreview,
-          );
-
-          const photographPreview =
-            URL.createObjectURL(file);
-
-          return {
-            ...currentValues,
-            photograph: file,
-            photographPreview,
-          };
-        },
-      );
     },
     [],
   );
 
-  /**
-   * Removes the selected photograph and its preview.
-   */
-  const removePhotograph =
-    useCallback(() => {
-      setFormValues(
-        (currentValues) => {
-          revokePreview(
-            currentValues
-              .photographPreview,
-          );
+  const updateField = useCallback(
+    (name, value) => {
+      setError("");
 
-          return {
-            ...currentValues,
-            photograph: null,
-            photographPreview: "",
-          };
-        }
+      setValues((current) => ({
+        ...current,
+        [name]: value,
+      }));
+    },
+    [],
+  );
+
+  const updatePhotograph = useCallback((file) => {
+    setError("");
+
+    if (!file) {
+      return;
+    }
+
+    if (!ALLOWED_IMAGE_TYPES.has(file.type)) {
+      setError(
+        "Only JPG, JPEG, PNG, or SVG images are allowed.",
       );
 
-      setError("");
-      setSuccessMessage("");
-    }, []);
+      return;
+    }
 
-  /**
-   * Validates the observation form before submission.
-   */
-  const validateForm =
-    useCallback(() => {
-      if (!assignment?.id) {
-        return (
-          "There is no current weekly " +
-          "patrol assignment available."
+    if (file.size > MAX_IMAGE_SIZE) {
+      setError(
+        "The observation photograph must be 10 MB or smaller.",
+      );
+
+      return;
+    }
+
+    setValues((current) => {
+      if (current.photographPreview) {
+        URL.revokeObjectURL(
+          current.photographPreview,
         );
       }
 
-      if (existingReport) {
-        return (
-          "An observation report has already " +
-          "been created for this patrol."
+      return {
+        ...current,
+        photograph: file,
+        photographPreview:
+          URL.createObjectURL(file),
+      };
+    });
+  }, []);
+
+  const removePhotograph = useCallback(() => {
+    setError("");
+
+    setValues((current) => {
+      if (current.photographPreview) {
+        URL.revokeObjectURL(
+          current.photographPreview,
         );
       }
 
-      if (!formValues.findingDate) {
-        return "Finding date is required.";
-      }
+      return {
+        ...current,
+        photograph: null,
+        photographPreview: "",
+      };
+    });
+  }, []);
 
-      if (!formValues.location) {
-        return "Select the plant location.";
-      }
+  function validate() {
+    if (!assignment?.id) {
+      return "No patrol is selected.";
+    }
 
-      if (
-        !["UA", "UC"].includes(
-          formValues.category,
-        )
-      ) {
-        return (
-          "Select UA or UC as the " +
-          "observation category."
-        );
-      }
+    if (!values.findingDate) {
+      return "Finding date is required.";
+    }
 
-      if (!formValues.photograph) {
-        return (
-          "Add a photograph of the " +
-          "observation."
-        );
-      }
+    if (!values.zoneAreaId) {
+      return "Select the area where the observation was made.";
+    }
 
-      if (
-        !ALLOWED_IMAGE_TYPES.has(
-          formValues.photograph.type,
-        )
-      ) {
-        return (
-          "The selected photograph format " +
-          "is not supported."
-        );
-      }
+    if (
+      !["UA", "UC"].includes(values.category)
+    ) {
+      return "Select UA or UC as the observation category.";
+    }
 
-      if (
-        formValues.photograph.size >
-        MAX_IMAGE_SIZE
-      ) {
-        return (
-          "The observation photograph " +
-          "must be 10 MB or smaller."
-        );
-      }
+    if (!values.photograph) {
+      return "Add a photograph of the observation.";
+    }
 
-      if (
-        !formValues.description.trim()
-      ) {
-        return (
-          "Enter the observation " +
-          "description."
-        );
-      }
+    if (!values.description.trim()) {
+      return "Enter the observation description.";
+    }
 
-      if (
-        countWords(
-          formValues.description,
-        ) > MAX_DESCRIPTION_WORDS
-      ) {
-        return (
-          "Observation description cannot " +
-          `exceed ${MAX_DESCRIPTION_WORDS} words.`
-        );
-      }
+    if (
+      countWords(values.description) >
+      MAX_DESCRIPTION_WORDS
+    ) {
+      return `Observation description cannot exceed ${MAX_DESCRIPTION_WORDS} words.`;
+    }
 
-      if (
-        ![
-          "HIGH",
-          "MEDIUM",
-          "LOW",
-        ].includes(
-          formValues.riskCategory,
-        )
-      ) {
-        return "Select a risk category.";
-      }
+    if (
+      !["HIGH", "MEDIUM", "LOW"].includes(
+        values.riskCategory,
+      )
+    ) {
+      return "Select a risk category.";
+    }
 
-      return "";
-    }, [
-      assignment,
-      existingReport,
-      formValues,
-    ]);
+    return "";
+  }
 
-  /**
-   * Sends the observation report to the backend.
-   */
-  const submitObservation =
-    useCallback(async () => {
-      if (submitting) {
-        return null;
-      }
+  const submit = useCallback(async () => {
+    if (submitting) {
+      return null;
+    }
 
-      setError("");
-      setSuccessMessage("");
+    const validationError = validate();
 
-      const validationError =
-        validateForm();
+    if (validationError) {
+      setError(validationError);
+      return null;
+    }
 
-      if (validationError) {
-        setError(validationError);
-        return null;
-      }
+    setSubmitting(true);
+    setError("");
 
-      setSubmitting(true);
-
-      try {
-        const result =
-          await createObservationReport({
-            patrolId: assignment.id,
-
-            findingDate:
-              formValues.findingDate,
-
-            location:
-              formValues.location,
-
-            category:
-              formValues.category,
-
-            photograph:
-              formValues.photograph,
-
-            description:
-              formValues.description,
-
-            riskCategory:
-              formValues.riskCategory,
-          });
-
-        setSuccessMessage(
-          result?.message ??
-            "Observation Sent Successfully!",
-        );
-
-        setExistingReport(
-          result?.report ?? {
-            id: result?.reportId ?? null,
-
-            status:
-              "PENDING_AUDITEE_ACTION",
-
-            displayStatus:
-              "In Progress",
-
-            submittedAt:
-              new Date().toISOString(),
-          },
-        );
-
-        return result;
-      } catch (requestError) {
-        setError(
-          getErrorMessage(requestError),
-        );
-
-        return null;
-      } finally {
-        setSubmitting(false);
-      }
-    }, [
-      assignment,
-      formValues,
-      submitting,
-      validateForm,
-    ]);
+    try {
+      return await createObservationReport({
+        patrolId: assignment.id,
+        findingDate: values.findingDate,
+        zoneAreaId: values.zoneAreaId,
+        category: values.category,
+        photograph: values.photograph,
+        description: values.description,
+        riskCategory: values.riskCategory,
+      });
+    } catch (requestError) {
+      setError(getErrorMessage(requestError));
+      return null;
+    } finally {
+      setSubmitting(false);
+    }
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, [assignment, values, submitting]);
 
   return {
-    assignment,
-    existingReport,
-    formValues,
-
-    descriptionWordCount:
-      countWords(
-        formValues.description,
-      ),
-
+    values,
+    descriptionWordCount: countWords(
+      values.description,
+    ),
     maxDescriptionWords:
       MAX_DESCRIPTION_WORDS,
-
-    loading,
     submitting,
     error,
-    successMessage,
-
     updateField,
     updatePhotograph,
     removePhotograph,
-    submitObservation,
-
-    reload:
-      loadCurrentAssignment,
+    submit,
   };
+}
+
+/**
+ * One filed report plus its photograph, for the read-only detail view.
+ */
+export function useObservationDetail(reportId) {
+  const [report, setReport] = useState(null);
+  const [photograph, setPhotograph] =
+    useState("");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const previewRef = useRef("");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      setLoading(true);
+      setError("");
+
+      try {
+        const result =
+          await fetchObservationReport(reportId);
+
+        if (cancelled) {
+          return;
+        }
+
+        setReport(result?.report ?? null);
+
+        try {
+          const blob =
+            await fetchObservationPhotograph(
+              reportId,
+            );
+
+          if (cancelled) {
+            return;
+          }
+
+          const url =
+            URL.createObjectURL(blob);
+
+          previewRef.current = url;
+          setPhotograph(url);
+        } catch {
+          /*
+           * A missing photo should not hide the rest of the report.
+           */
+          if (!cancelled) {
+            setPhotograph("");
+          }
+        }
+      } catch (requestError) {
+        if (!cancelled) {
+          setError(
+            getErrorMessage(requestError),
+          );
+          setReport(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    if (reportId) {
+      load();
+    }
+
+    return () => {
+      cancelled = true;
+
+      if (previewRef.current) {
+        URL.revokeObjectURL(previewRef.current);
+        previewRef.current = "";
+      }
+    };
+  }, [reportId]);
+
+  return { report, photograph, loading, error };
 }

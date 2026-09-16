@@ -3,7 +3,7 @@ import * as observationService
 
 import path from "node:path";
 
-export async function getCurrentAssignment(
+export async function getWeeklyAssignments(
   req,
   res,
   next,
@@ -11,8 +11,27 @@ export async function getCurrentAssignment(
   try {
     const result =
       await observationService
-        .getCurrentAssignment({
+        .getWeeklyAssignments({
           userId: req.user.id,
+        });
+
+    res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getObservationReport(
+  req,
+  res,
+  next,
+) {
+  try {
+    const result =
+      await observationService
+        .getObservationReport({
+          userId: req.user.id,
+          reportId: req.params.reportId,
         });
 
     res.status(200).json(result);
@@ -38,8 +57,8 @@ export async function createObservation(
           findingDate:
             req.body.findingDate,
 
-          location:
-            req.body.location,
+          zoneAreaId:
+            req.body.zoneAreaId,
 
           category:
             req.body.category,

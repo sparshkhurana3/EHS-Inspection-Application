@@ -107,7 +107,4 @@ app.use(
 app.use(notFoundHandler);
 app.use(errorHandler);
 
-app.use(notFoundHandler);
-app.use(errorHandler);
-
 export default app;

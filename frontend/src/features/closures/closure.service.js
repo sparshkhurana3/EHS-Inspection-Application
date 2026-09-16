@@ -2,34 +2,23 @@ import {
   apiRequest,
 } from "../../services/apiClient.js";
 
-export function fetchCurrentClosure() {
+export function fetchAuditeeClosures() {
+  return apiRequest("/closures", {
+    method: "GET",
+  });
+}
+
+export function fetchClosureById(closureId) {
   return apiRequest(
-    "/closures/current",
-    {
-      method: "GET",
-    },
+    `/closures/${encodeURIComponent(closureId)}`,
+    { method: "GET" },
   );
 }
 
 export function fetchPendingApprovals() {
   return apiRequest(
     "/closures/pending-approvals",
-    {
-      method: "GET",
-    },
-  );
-}
-
-export function fetchClosureForApproval(
-  closureId,
-) {
-  return apiRequest(
-    `/closures/${encodeURIComponent(
-      closureId,
-    )}/approval`,
-    {
-      method: "GET",
-    },
+    { method: "GET" },
   );
 }
 
@@ -45,7 +34,6 @@ export function saveClosureActionPlan({
     )}/action-plan`,
     {
       method: "PATCH",
-
       body: JSON.stringify({
         actionPlan,
         targetDate,
@@ -55,16 +43,12 @@ export function saveClosureActionPlan({
   );
 }
 
-export function submitClosureReport({
-  closureId,
-}) {
+export function submitClosureReport(closureId) {
   return apiRequest(
     `/closures/${encodeURIComponent(
       closureId,
     )}/submit`,
-    {
-      method: "POST",
-    },
+    { method: "POST" },
   );
 }
 
@@ -78,10 +62,7 @@ export function approveClosureReport({
     )}/approve`,
     {
       method: "POST",
-
-      body: JSON.stringify({
-        reviewComments,
-      }),
+      body: JSON.stringify({ reviewComments }),
     },
   );
 }
@@ -96,23 +77,7 @@ export function rejectClosureReport({
     )}/reject`,
     {
       method: "POST",
-
-      body: JSON.stringify({
-        reviewComments,
-      }),
-    },
-  );
-}
-
-export function fetchObservationPhotograph(
-  reportId,
-) {
-  return apiBlobRequest(
-    `/observations/${encodeURIComponent(
-      reportId,
-    )}/photograph`,
-    {
-      method: "GET",
+      body: JSON.stringify({ reviewComments }),
     },
   );
 }

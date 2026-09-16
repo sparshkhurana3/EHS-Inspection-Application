@@ -5,35 +5,23 @@ import {
 export function fetchPlanningLookups() {
   return apiRequest(
     "/patrols/planning-lookups",
-    {
-      method: "GET",
-    },
+    { method: "GET" },
   );
 }
 
 export function schedulePatrol({
-  location,
-  unit,
-  zone,
-  areaDetail,
+  zoneId,
   scheduledDate,
   auditorId,
   auditeeId,
 }) {
-  return apiRequest(
-    "/patrols",
-    {
-      method: "POST",
-
-      body: JSON.stringify({
-        location,
-        unit,
-        zone,
-        areaDetail,
-        scheduledDate,
-        auditorId,
-        auditeeId,
-      }),
-    },
-  );
+  return apiRequest("/patrols", {
+    method: "POST",
+    body: JSON.stringify({
+      zoneId: Number(zoneId),
+      scheduledDate,
+      auditorId: Number(auditorId),
+      auditeeId: Number(auditeeId),
+    }),
+  });
 }

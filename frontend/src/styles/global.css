@@ -1425,3 +1425,219 @@ a { color: inherit; }
   .closure-status-label { width: 100%; }
   .closure-observation-photograph, .closure-photograph-loading, .closure-photograph-unavailable { margin-right: 15px; margin-left: 15px; }
 }
+
+/* Weekly observation and closure lists */
+
+.observation-list,
+.closure-list {
+  list-style: none;
+  margin: 0 0 24px;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.observation-list-item,
+.closure-list-item {
+  width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 16px;
+  background: #ffffff;
+  border: 1px solid #e4e7ec;
+  border-left: 4px solid #12b76a;
+  border-radius: 10px;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+.observation-list-item:hover,
+.closure-list-item:hover {
+  border-color: #12b76a;
+  box-shadow: 0 1px 6px rgba(16, 24, 40, 0.08);
+}
+
+.observation-list-item:focus-visible,
+.closure-list-item:focus-visible {
+  outline: 2px solid #087f5b;
+  outline-offset: 2px;
+}
+
+.closure-list-lapsed {
+  border-left-color: #b42318;
+}
+
+.closure-list-completed {
+  border-left-color: #667085;
+}
+
+.observation-list-main,
+.closure-list-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.observation-list-main span,
+.closure-list-main span {
+  color: #667085;
+  font-size: 0.9rem;
+}
+
+.observation-list-meta,
+.closure-list-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: #667085;
+  font-size: 0.85rem;
+}
+
+.observation-status-chip,
+.closure-status-chip {
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: #ecfdf3;
+  color: #067647;
+  font-weight: 600;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.closure-returned-badge,
+.closure-lapsed-badge {
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-weight: 600;
+  font-size: 0.8rem;
+  white-space: nowrap;
+  background: #fef3f2;
+  color: #b42318;
+}
+
+.closure-lapsed-badge {
+  background: #fffaeb;
+  color: #b54708;
+}
+
+.observation-action-hint {
+  color: #067647;
+  font-weight: 600;
+}
+
+.observation-empty-note,
+.closure-empty-note {
+  margin: 0 0 24px;
+  padding: 14px 16px;
+  border: 1px dashed #e4e7ec;
+  border-radius: 10px;
+  color: #667085;
+  background: #ffffff;
+}
+
+/* Detail panels */
+
+.observation-detail-body,
+.observation-detail-photo {
+  margin: 20px 0;
+}
+
+.observation-detail-body span,
+.observation-detail-photo span {
+  display: block;
+  color: #667085;
+  font-size: 0.85rem;
+  margin-bottom: 6px;
+}
+
+.observation-detail-photo img,
+.observation-photo-preview img {
+  max-width: 100%;
+  border-radius: 10px;
+  border: 1px solid #e4e7ec;
+}
+
+.closure-detail-grid,
+.observation-assignment-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.closure-detail-grid span,
+.observation-assignment-grid span {
+  display: block;
+  color: #667085;
+  font-size: 0.85rem;
+}
+
+.closure-observation,
+.closure-action-plan,
+.closure-approval,
+.patrol-form-card {
+  background: #ffffff;
+  border: 1px solid #e4e7ec;
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 24px;
+}
+
+.closure-form-actions,
+.closure-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.closure-form-actions {
+  margin-top: 16px;
+}
+
+.patrol-area-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.patrol-area-list li {
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: #f2f4f7;
+  color: #344054;
+  font-size: 0.85rem;
+}
+
+.patrol-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 16px;
+  padding: 16px;
+  margin-bottom: 24px;
+  background: #ecfdf3;
+  border-radius: 10px;
+}
+
+.patrol-summary span {
+  display: block;
+  color: #667085;
+  font-size: 0.85rem;
+}
+
+@media (max-width: 650px) {
+  .observation-list-item,
+  .closure-list-item {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

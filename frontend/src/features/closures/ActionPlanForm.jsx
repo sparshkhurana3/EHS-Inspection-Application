@@ -1,312 +1,185 @@
-function getClosureStatusDetails(statusValue) {
-  const status = String(
-    statusValue ?? "OPEN",
-  )
-    .trim()
-    .toUpperCase();
+import Alert from "../../components/Alert.jsx";
 
-  switch (status) {
-    case "IN_PROGRESS":
-      return {
-        label: "In Progress",
-        className:
-          "closure-status-in-progress",
-      };
+import { formatDate } from "../../lib/errorMessage.js";
 
-    case "SUBMITTED_FOR_CLOSURE":
-    case "PENDING_EHS_APPROVAL":
-      return {
-        label: "Sent for Closure",
-        className:
-          "closure-status-submitted",
-      };
-
-    case "APPROVED":
-    case "CLOSED":
-      return {
-        label: "Closed",
-        className:
-          "closure-status-closed",
-      };
-
-    case "REEXAMINATION_REQUIRED":
-      return {
-        label: "Re-examination Required",
-        className:
-          "closure-status-reexamination",
-      };
-
-    case "REJECTED":
-      return {
-        label: "Rejected",
-        className:
-          "closure-status-rejected",
-      };
-
-    case "OPEN":
-    default:
-      return {
-        label: "Open",
-        className:
-          "closure-status-open",
-      };
-  }
-}
-
+/**
+ * The auditee's half of a closure.
+ *
+ * `editable` comes from the server's canEditActionPlan rather than
+ * being inferred here; it was previously referenced but never declared,
+ * which threw on first render and took the whole page down.
+ */
 export default function ActionPlanForm({
   closure,
-  formValues,
+  values,
   actionPlanWordCount,
   maxActionPlanWords,
   saving,
   submitting,
+  error,
   onFieldChange,
   onSave,
-  onSubmitForClosure,
+  onSendForApproval,
 }) {
-  const normalizedStatus = String(
-    closure?.status ?? "OPEN",
-  )
-    .trim()
-    .toUpperCase();
+  const editable = Boolean(
+    closure?.canEditActionPlan,
+  );
 
-  const statusDetails =
-    getClosureStatusDetails(
-      normalizedStatus,
-    );
+  const canSubmit = Boolean(
+    closure?.canSubmitForClosure,
+  );
 
-  const canSubmitForClosure =
-    normalizedStatus === "IN_PROGRESS" &&
-    Boolean(formValues.actionPlan.trim()) &&
-    Boolean(formValues.targetDate) &&
-    Boolean(
-      formValues.responsibleHodName.trim(),
-    );
-
-  function handleFieldChange(
-    fieldName,
-    fieldValue,
-  ) {
-    if (
-      typeof onFieldChange === "function"
-    ) {
-      onFieldChange(
-        fieldName,
-        fieldValue,
-      );
-    }
-  }
+  const busy = saving || submitting;
 
   function handleSave(event) {
     event.preventDefault();
-
-    if (
-      editable &&
-      typeof onSave === "function"
-    ) {
-      onSave();
-    }
-  }
-
-  function handleSubmitForClosure() {
-    if (
-      canSubmitForClosure &&
-      typeof onSubmitForClosure ===
-        "function"
-    ) {
-      onSubmitForClosure();
-    }
+    onSave();
   }
 
   return (
-    <form
-      className="closure-action-form"
-      onSubmit={handleSave}
-      noValidate
-    >
-      <div className="closure-action-form-heading">
+    <section className="closure-action-plan">
+      <header className="observation-section-header">
         <div>
-          <span className="dashboard-eyebrow">
-            Auditee response
-          </span>
+          <h3>Closure report</h3>
 
-          <h2>Corrective Action Plan</h2>
+          {closure?.approvalIteration > 1 ? (
+            <p>
+              Attempt {closure.approvalIteration}
+            </p>
+          ) : null}
         </div>
 
-        <div
-          className={[
-            "closure-status-label",
-            statusDetails.className,
-          ].join(" ")}
-          role="status"
-          aria-label={
-            `Closure status: ${statusDetails.label}`
-          }
+        <span className="closure-status-chip">
+          {closure?.displayStatus}
+        </span>
+      </header>
+
+      {/*
+        * A rejection clears the action plan but keeps the target date,
+        * so the officer's reason has to be visible or the empty field
+        * looks like a bug.
+        */}
+      {closure?.wasReturned &&
+      closure?.reviewComments ? (
+        <Alert
+          type="warning"
+          title="Sent back by the EHS Officer"
         >
-          <span
-            className="closure-status-indicator"
-            aria-hidden="true"
+          {closure.reviewComments}
+        </Alert>
+      ) : null}
+
+      {error ? (
+        <Alert type="error">{error}</Alert>
+      ) : null}
+
+      <form noValidate onSubmit={handleSave}>
+        <div className="form-field">
+          <label htmlFor="actionPlan">
+            Action plan
+          </label>
+
+          <textarea
+            id="actionPlan"
+            rows="7"
+            aria-describedby="action-plan-count"
+            value={values.actionPlan}
+            disabled={!editable || busy}
+            onChange={(event) =>
+              onFieldChange(
+                "actionPlan",
+                event.target.value,
+              )
+            }
           />
 
-          <span className="closure-status-title">
-            Closure status
-          </span>
-
-          <strong>
-            {statusDetails.label}
-          </strong>
-        </div>
-      </div>
-
-      <div
-        className={[
-          "closure-form-field",
-          "closure-action-plan-field",
-        ].join(" ")}
-      >
-        <label htmlFor="closure-action-plan">
-          Action plan
-
-          <span
-            className="required-marker"
-            aria-hidden="true"
-          >
-            {" "}*
-          </span>
-        </label>
-
-        <textarea
-          id="closure-action-plan"
-          name="actionPlan"
-          value={formValues.actionPlan}
-          rows={7}
-          placeholder="Describe the corrective action that will be implemented."
-          onChange={(event) => {
-            handleFieldChange(
-              "actionPlan",
-              event.target.value,
-            );
-          }}
-          disabled={
-            !editable ||
-            saving ||
-            submitting
-          }
-          required
-        />
-
-        <div className="closure-word-count">
-          <span>
-            Maximum {maxActionPlanWords} words
-          </span>
-
-          <span>
+          <span id="action-plan-count">
             {actionPlanWordCount}/
-            {maxActionPlanWords}
+            {maxActionPlanWords} words
           </span>
         </div>
-      </div>
 
-      <div className="closure-form-grid">
-        <div className="closure-form-field">
-          <label htmlFor="closure-target-date">
+        <div className="form-field">
+          <label htmlFor="targetDate">
             Target date
-
-            <span
-              className="required-marker"
-              aria-hidden="true"
-            >
-              {" "}*
-            </span>
           </label>
 
           <input
-            id="closure-target-date"
-            name="targetDate"
+            id="targetDate"
             type="date"
-            value={formValues.targetDate}
-            onChange={(event) => {
-              handleFieldChange(
+            value={values.targetDate}
+            disabled={!editable || busy}
+            onChange={(event) =>
+              onFieldChange(
                 "targetDate",
                 event.target.value,
-              );
-            }}
-            disabled={
-              !editable ||
-              saving ||
-              submitting
+              )
             }
-            required
           />
         </div>
 
-        <div className="closure-form-field">
-          <label htmlFor="responsible-hod-name">
-            Responsible HOD name
-
-            <span
-              className="required-marker"
-              aria-hidden="true"
-            >
-              {" "}*
-            </span>
+        <div className="form-field">
+          <label htmlFor="responsibleHodName">
+            Responsible HOD
           </label>
 
           <input
-            id="responsible-hod-name"
-            name="responsibleHodName"
+            id="responsibleHodName"
             type="text"
-            value={
-              formValues.responsibleHodName
-            }
-            placeholder="Enter the full name"
             maxLength={255}
-            onChange={(event) => {
-              handleFieldChange(
+            value={values.responsibleHodName}
+            disabled={!editable || busy}
+            onChange={(event) =>
+              onFieldChange(
                 "responsibleHodName",
                 event.target.value,
-              );
-            }}
-            disabled={
-              !editable ||
-              saving ||
-              submitting
+              )
             }
-            required
           />
         </div>
-      </div>
 
-      {editable && (
-        <div className="closure-form-actions">
-          <button
-            type="submit"
-            className="button button-secondary"
-            disabled={saving || submitting}
-          >
-            {saving
-              ? "Saving Action Plan..."
-              : "Save Action Plan"}
-          </button>
+        {closure?.completionDate ? (
+          <p className="closure-empty-note">
+            Completion date recorded:{" "}
+            {formatDate(closure.completionDate)}
+          </p>
+        ) : null}
 
-          <button
-            type="button"
-            className="button button-primary"
-            onClick={
-              handleSubmitForClosure
-            }
-            disabled={
-              saving ||
-              submitting ||
-              !canSubmitForClosure
-            }
-          >
-            {submitting
-              ? "Sending..."
-              : "Send report for closure"}
-          </button>
-        </div>
-      )}
-    </form>
+        {editable ? (
+          <div className="closure-form-actions">
+            <button
+              type="submit"
+              className="button button-secondary"
+              disabled={busy}
+            >
+              {saving
+                ? "Saving..."
+                : "Save action plan"}
+            </button>
+
+            <button
+              type="button"
+              className="button button-primary"
+              disabled={busy || !canSubmit}
+              title={
+                canSubmit
+                  ? undefined
+                  : "Save a complete action plan first."
+              }
+              onClick={onSendForApproval}
+            >
+              {submitting
+                ? "Sending..."
+                : "Send closure for approval"}
+            </button>
+          </div>
+        ) : (
+          <p className="closure-empty-note">
+            This closure is waiting for the EHS
+            Officer and cannot be edited.
+          </p>
+        )}
+      </form>
+    </section>
   );
 }

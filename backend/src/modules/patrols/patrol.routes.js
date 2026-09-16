@@ -23,6 +23,10 @@ import {
   createPatrolValidationRules,
 } from "./patrol.validator.js";
 
+import {
+  PLANNING_ROLES,
+} from "../../shared/constants/roles.js";
+
 const router = Router();
 
 /*
@@ -32,7 +36,7 @@ const router = Router();
 router.get(
   "/planning-lookups",
   authenticate,
-  authorize("EHS_OFFICER"),
+  authorize(...PLANNING_ROLES),
   getPlanningLookups,
 );
 
@@ -48,7 +52,7 @@ router.get(
 router.post(
   "/",
   authenticate,
-  authorize("EHS_OFFICER"),
+  authorize(...PLANNING_ROLES),
   createPatrolValidationRules,
   validate,
   createPatrol,

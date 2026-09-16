@@ -1,27 +1,14 @@
-import PhotographInput
-  from "./PhotographInput.jsx";
+import PhotographInput from "./PhotographInput.jsx";
+import RiskSelector from "./RiskSelector.jsx";
 
-import RiskSelector
-  from "./RiskSelector.jsx";
+import { formatDate } from "../../lib/errorMessage.js";
 
-const PLANT_LOCATIONS = [
-  "Gurugram",
-  "Pune",
-  "Chennai",
-  "Manesar",
-  "China",
-];
-
-function getAssignmentValue(
-  assignment,
-  camelCaseField,
-  snakeCaseField,
-  fallback = "Not available",
-) {
+function ReadOnlyField({ label, value }) {
   return (
-    assignment?.[camelCaseField] ??
-    assignment?.[snakeCaseField] ??
-    fallback
+    <div>
+      <span>{label}</span>
+      <strong>{value || "Not available"}</strong>
+    </div>
   );
 }
 
@@ -35,70 +22,11 @@ export default function ObservationCard({
   onPhotographChange,
   onPhotographRemove,
   onSubmit,
+  onCancel,
 }) {
-  const weekNumber =
-    getAssignmentValue(
-      assignment,
-      "weekNumber",
-      "week_number",
-    );
-
-  const unitNumber =
-    getAssignmentValue(
-      assignment,
-      "unitNumber",
-      "unit_number",
-      getAssignmentValue(
-        assignment,
-        "unitName",
-        "unit_name",
-      ),
-    );
-
-  const zoneNumber =
-    getAssignmentValue(
-      assignment,
-      "zoneNumber",
-      "zone_number",
-      getAssignmentValue(
-        assignment,
-        "zoneName",
-        "zone_name",
-      ),
-    );
-
-  const observationLocation =
-    getAssignmentValue(
-      assignment,
-      "observationLocation",
-      "observation_location",
-      getAssignmentValue(
-        assignment,
-        "areaDetail",
-        "area_detail",
-      ),
-    );
-
-  const auditeeName =
-    getAssignmentValue(
-      assignment,
-      "auditeeName",
-      "auditee_name",
-    );
-
-  const ehsOfficerName =
-    getAssignmentValue(
-      assignment,
-      "ehsOfficerName",
-      "ehs_officer_name",
-    );
-
-  const auditorName =
-    getAssignmentValue(
-      assignment,
-      "auditorName",
-      "auditor_name",
-    );
+  const areas = Array.isArray(assignment?.areas)
+    ? assignment.areas
+    : [];
 
   function handleSubmit(event) {
     event.preventDefault();
@@ -106,288 +34,244 @@ export default function ObservationCard({
   }
 
   return (
-    <form
-      className="observation-report-form"
-      onSubmit={handleSubmit}
-      noValidate
-    >
-      <section className="observation-assignment-card">
-        <header className="observation-section-header">
-          <div>
-            <span className="dashboard-eyebrow">
-              Current weekly assignment
-            </span>
-
-            <h2>Patrol information</h2>
-          </div>
-
-          <span className="observation-assignment-status">
-            Scheduled
+    <section className="observation-card">
+      <header className="observation-section-header">
+        <div>
+          <span className="dashboard-eyebrow">
+            Auditor workflow
           </span>
-        </header>
 
-        <div className="observation-assignment-grid">
-          <div>
-            <span>Week number</span>
-            <strong>{weekNumber}</strong>
-          </div>
-
-          <div>
-            <span>Unit number</span>
-            <strong>{unitNumber}</strong>
-          </div>
-
-          <div>
-            <span>Zone number</span>
-            <strong>{zoneNumber}</strong>
-          </div>
-
-          <div>
-            <span>Auditee name</span>
-            <strong>{auditeeName}</strong>
-          </div>
-
-          <div>
-            <span>EHS Officer</span>
-            <strong>{ehsOfficerName}</strong>
-          </div>
-
-          <div>
-            <span>Auditor name</span>
-            <strong>{auditorName}</strong>
-          </div>
+          <h2>Patrol Observation Report</h2>
         </div>
-      </section>
 
-      <section className="observation-form-card">
-        <header className="observation-section-header">
-          <div>
-            <span className="dashboard-eyebrow">
-              Patrol Observation Report
+        <button
+          type="button"
+          className="button button-secondary"
+          onClick={onCancel}
+          disabled={submitting}
+        >
+          Back
+        </button>
+      </header>
+
+      {/*
+        * Assignment facts come from the patrol and cannot be edited
+        * here. The plant location in particular is derived server-side,
+        * so a report can never claim a different site from its audit.
+        */}
+      <div className="observation-assignment-grid">
+        <ReadOnlyField
+          label="Audit date"
+          value={formatDate(
+            assignment?.scheduledDate,
+          )}
+        />
+        <ReadOnlyField
+          label="Plant"
+          value={assignment?.plantLocation}
+        />
+        <ReadOnlyField
+          label="Unit"
+          value={assignment?.unitName}
+        />
+        <ReadOnlyField
+          label="Zone"
+          value={assignment?.zoneName}
+        />
+        <ReadOnlyField
+          label="Auditee"
+          value={assignment?.auditeeName}
+        />
+        <ReadOnlyField
+          label="EHS Officer"
+          value={assignment?.ehsOfficerName}
+        />
+      </div>
+
+      <form
+        className="observation-form"
+        noValidate
+        onSubmit={handleSubmit}
+      >
+        <div className="form-field">
+          <label htmlFor="findingDate">
+            Finding date
+            <span
+              className="required-marker"
+              aria-hidden="true"
+            >
+              {" *"}
             </span>
+          </label>
 
-            <h2>Add observation</h2>
-
-            <p>
-              Record the finding identified
-              during the assigned patrol.
-            </p>
-          </div>
-        </header>
-
-        <div className="observation-form-grid">
-          <div className="observation-form-field">
-            <label htmlFor="finding-date">
-              Finding date
-              <span aria-hidden="true">
-                {" "}*
-              </span>
-            </label>
-
-            <input
-              id="finding-date"
-              name="findingDate"
-              type="date"
-              value={
-                formValues.findingDate
-              }
-              onChange={(event) =>
-                onFieldChange(
-                  "findingDate",
-                  event.target.value,
-                )
-              }
-              disabled={submitting}
-              required
-            />
-
-            <small>
-              Automatically set when the
-              report is started.
-            </small>
-          </div>
-
-          <div className="observation-form-field">
-            <label htmlFor="plant-location">
-              Plant location
-              <span aria-hidden="true">
-                {" "}*
-              </span>
-            </label>
-
-            <select
-              id="plant-location"
-              name="location"
-              value={formValues.location}
-              onChange={(event) =>
-                onFieldChange(
-                  "location",
-                  event.target.value,
-                )
-              }
-              disabled={submitting}
-              required
-            >
-              <option value="">
-                Select location
-              </option>
-
-              {PLANT_LOCATIONS.map(
-                (location) => (
-                  <option
-                    key={location}
-                    value={location}
-                  >
-                    {location}
-                  </option>
-                ),
-              )}
-            </select>
-          </div>
-
-          <div className="observation-form-field">
-            <label htmlFor="observation-location">
-              Location of observation
-            </label>
-
-            <input
-              id="observation-location"
-              type="text"
-              value={observationLocation}
-              readOnly
-            />
-
-            <small>
-              Taken from the assigned patrol.
-            </small>
-          </div>
-
-          <div className="observation-form-field">
-            <label htmlFor="observation-category">
-              Category
-              <span aria-hidden="true">
-                {" "}*
-              </span>
-            </label>
-
-            <select
-              id="observation-category"
-              name="category"
-              value={formValues.category}
-              onChange={(event) =>
-                onFieldChange(
-                  "category",
-                  event.target.value,
-                )
-              }
-              disabled={submitting}
-              required
-            >
-              <option value="">
-                Select category
-              </option>
-
-              <option value="UC">
-                UC - Unsafe Condition
-              </option>
-
-              <option value="UA">
-                UA - Unsafe Act
-              </option>
-            </select>
-          </div>
-
-          <PhotographInput
-            photograph={
-              formValues.photograph
-            }
-            photographPreview={
-              formValues
-                .photographPreview
-            }
+          <input
+            id="findingDate"
+            type="date"
+            required
+            aria-required="true"
+            value={formValues.findingDate}
             disabled={submitting}
-            onChange={
-              onPhotographChange
+            onChange={(event) =>
+              onFieldChange(
+                "findingDate",
+                event.target.value,
+              )
             }
-            onRemove={
-              onPhotographRemove
+          />
+        </div>
+
+        {/*
+          * A patrol covers the whole zone, so the auditor names the
+          * area the finding was actually in. The options are that
+          * zone's own fixed areas, loaded from the database.
+          */}
+        <div className="form-field">
+          <label htmlFor="zoneAreaId">
+            Area of observation
+            <span
+              className="required-marker"
+              aria-hidden="true"
+            >
+              {" *"}
+            </span>
+          </label>
+
+          {areas.length === 0 ? (
+            <p className="observation-empty-note">
+              No areas are configured for this
+              zone, so an observation cannot be
+              recorded. Ask your EHS Officer to
+              configure them.
+            </p>
+          ) : (
+            <select
+              id="zoneAreaId"
+              required
+              aria-required="true"
+              value={formValues.zoneAreaId}
+              disabled={submitting}
+              onChange={(event) =>
+                onFieldChange(
+                  "zoneAreaId",
+                  event.target.value,
+                )
+              }
+            >
+              <option value="">
+                Select the area
+              </option>
+
+              {areas.map((area) => (
+                <option
+                  key={area.id}
+                  value={area.id}
+                >
+                  {area.name}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+
+        <div className="form-field">
+          <label htmlFor="category">
+            Category
+            <span
+              className="required-marker"
+              aria-hidden="true"
+            >
+              {" *"}
+            </span>
+          </label>
+
+          <select
+            id="category"
+            required
+            aria-required="true"
+            value={formValues.category}
+            disabled={submitting}
+            onChange={(event) =>
+              onFieldChange(
+                "category",
+                event.target.value,
+              )
+            }
+          >
+            <option value="">
+              Select the category
+            </option>
+            <option value="UC">
+              UC - Unsafe Condition
+            </option>
+            <option value="UA">
+              UA - Unsafe Act
+            </option>
+          </select>
+        </div>
+
+        <PhotographInput
+          photograph={formValues.photograph}
+          photographPreview={
+            formValues.photographPreview
+          }
+          disabled={submitting}
+          onChange={onPhotographChange}
+          onRemove={onPhotographRemove}
+        />
+
+        <div className="form-field">
+          <label htmlFor="description">
+            Observation description
+            <span
+              className="required-marker"
+              aria-hidden="true"
+            >
+              {" *"}
+            </span>
+          </label>
+
+          <textarea
+            id="description"
+            rows="8"
+            required
+            aria-required="true"
+            aria-describedby="description-count"
+            value={formValues.description}
+            disabled={submitting}
+            onChange={(event) =>
+              onFieldChange(
+                "description",
+                event.target.value,
+              )
             }
           />
 
-          <div className="observation-form-field observation-description-field">
-            <label htmlFor="observation-description">
-              Observation description
-              <span aria-hidden="true">
-                {" "}*
-              </span>
-            </label>
-
-            <textarea
-              id="observation-description"
-              name="description"
-              rows="8"
-              value={
-                formValues.description
-              }
-              placeholder="Describe the unsafe act or unsafe condition, its location, and the potential safety impact."
-              onChange={(event) =>
-                onFieldChange(
-                  "description",
-                  event.target.value,
-                )
-              }
-              disabled={submitting}
-              required
-            />
-
-            <div className="observation-description-meta">
-              <small>
-                Use clear and factual language.
-              </small>
-
-              <small>
-                {descriptionWordCount}/
-                {maxDescriptionWords} words
-              </small>
-            </div>
-          </div>
+          <span id="description-count">
+            {descriptionWordCount}/
+            {maxDescriptionWords} words
+          </span>
         </div>
 
         <RiskSelector
           value={formValues.riskCategory}
           disabled={submitting}
-          onChange={(selectedRisk) => {
-            onFieldChange(
-              "riskCategory",
-              selectedRisk,
-            );
-          }}
+          onChange={(value) =>
+            onFieldChange("riskCategory", value)
+          }
         />
 
-        <div className="observation-submit-panel">
-          <div>
-            <strong>
-              Send report to auditee
-            </strong>
-
-            <p>
-              The observation will be sent
-              to the assigned auditee for
-              action plan and closure.
-            </p>
-          </div>
-
-          <button
-            type="submit"
-            className="button button-primary"
-            disabled={submitting}
-          >
-            {submitting
-              ? "Sending observation..."
-              : "Send Observation for Closure"}
-          </button>
-        </div>
-      </section>
-    </form>
+        <button
+          type="submit"
+          className="button button-primary"
+          disabled={
+            submitting || areas.length === 0
+          }
+        >
+          {submitting
+            ? "Sending observation..."
+            : "Send Observation for Closure"}
+        </button>
+      </form>
+    </section>
   );
 }

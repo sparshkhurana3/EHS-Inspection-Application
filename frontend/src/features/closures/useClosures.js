@@ -5,863 +5,384 @@ import {
   useState,
 } from "react";
 
-import useAuth
-  from "../auth/useAuth.js";
-
 import {
   approveClosureReport,
-  fetchCurrentClosure,
-  fetchObservationPhotograph,
+  fetchAuditeeClosures,
+  fetchClosureById,
   fetchPendingApprovals,
   rejectClosureReport,
   saveClosureActionPlan,
   submitClosureReport,
 } from "./closure.service.js";
 
-const MAX_ACTION_PLAN_WORDS = 255;
+import {
+  fetchObservationPhotograph,
+} from "../observations/observation.service.js";
 
-const INITIAL_FORM_VALUES = {
-  actionPlan: "",
-  targetDate: "",
-  responsibleHodName: "",
-};
+import {
+  getErrorMessage,
+} from "../../lib/errorMessage.js";
 
-function normalizeRole(role) {
-  if (typeof role === "string") {
-    return role
-      .trim()
-      .toUpperCase();
-  }
+export const MAX_ACTION_PLAN_WORDS = 255;
 
-  return String(
-    role?.code ??
-    role?.roleCode ??
-    role?.role_code ??
-    role?.name ??
-    "",
-  )
-    .trim()
-    .toUpperCase();
+export function countWords(value) {
+  const trimmed = String(value ?? "").trim();
+
+  return trimmed
+    ? trimmed.split(/\s+/).filter(Boolean).length
+    : 0;
 }
 
-function getUserRoles(user) {
-  const roleValue =
-    user?.roles ??
-    user?.roleCodes ??
-    user?.role_codes ??
-    user?.appRoles ??
-    user?.app_roles ??
-    [];
-
-  if (Array.isArray(roleValue)) {
-    return roleValue
-      .map(normalizeRole)
-      .filter(Boolean);
-  }
-
-  if (typeof roleValue === "string") {
-    return roleValue
-      .split(",")
-      .map((role) => {
-        return role
-          .trim()
-          .toUpperCase();
-      })
-      .filter(Boolean);
-  }
-
-  return [];
+function toDateInputValue(value) {
+  return value
+    ? String(value).slice(0, 10)
+    : "";
 }
 
-function hasRole(user, roleCode) {
-  return getUserRoles(user).includes(
-    String(roleCode ?? "")
-      .trim()
-      .toUpperCase(),
+/**
+ * The auditee's page: what they still owe, what has lapsed, and what
+ * was completed in the last week.
+ */
+export function useAuditeeClosures() {
+  const [data, setData] = useState({
+    pending: [],
+    lapsed: [],
+    completed: [],
+    pendingCount: 0,
+    lapsedCount: 0,
+    completedCount: 0,
+    pendingWindowMonths: 6,
+    completedWindowDays: 7,
+  });
+
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError("");
+
+    try {
+      const result =
+        await fetchAuditeeClosures();
+
+      setData({
+        pending: result?.pending ?? [],
+        lapsed: result?.lapsed ?? [],
+        completed: result?.completed ?? [],
+        pendingCount: result?.pendingCount ?? 0,
+        lapsedCount: result?.lapsedCount ?? 0,
+        completedCount:
+          result?.completedCount ?? 0,
+        pendingWindowMonths:
+          result?.pendingWindowMonths ?? 6,
+        completedWindowDays:
+          result?.completedWindowDays ?? 7,
+      });
+    } catch (requestError) {
+      setError(getErrorMessage(requestError));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  return { ...data, loading, error, reload: load };
+}
+
+/**
+ * One closure with its photograph, for the detail and form views.
+ */
+export function useClosureDetail(closureId) {
+  const [closure, setClosure] = useState(null);
+  const [photograph, setPhotograph] =
+    useState("");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const previewRef = useRef("");
+
+  const load = useCallback(async () => {
+    if (!closureId) {
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+
+    try {
+      const result =
+        await fetchClosureById(closureId);
+
+      const loaded = result?.closure ?? null;
+      setClosure(loaded);
+
+      if (loaded?.observationReportId) {
+        try {
+          const blob =
+            await fetchObservationPhotograph(
+              loaded.observationReportId,
+            );
+
+          if (previewRef.current) {
+            URL.revokeObjectURL(
+              previewRef.current,
+            );
+          }
+
+          const url =
+            URL.createObjectURL(blob);
+
+          previewRef.current = url;
+          setPhotograph(url);
+        } catch {
+          /* the report is still worth showing without its photo */
+          setPhotograph("");
+        }
+      }
+    } catch (requestError) {
+      setError(getErrorMessage(requestError));
+      setClosure(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [closureId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  useEffect(
+    () => () => {
+      if (previewRef.current) {
+        URL.revokeObjectURL(previewRef.current);
+        previewRef.current = "";
+      }
+    },
+    [],
   );
-}
 
-function countWords(value) {
-  const normalizedValue =
-    String(value ?? "").trim();
-
-  if (!normalizedValue) {
-    return 0;
-  }
-
-  return normalizedValue
-    .split(/\s+/)
-    .filter(Boolean)
-    .length;
-}
-
-function getDateInputValue(dateValue) {
-  if (!dateValue) {
-    return "";
-  }
-
-  return String(dateValue).slice(0, 10);
-}
-
-function getErrorMessage(error) {
-  if (
-    error instanceof TypeError &&
-    error.message === "Failed to fetch"
-  ) {
-    return (
-      "Unable to connect to the EHS API. " +
-      "Check that the backend is running."
-    );
-  }
-
-  if (
-    Array.isArray(error?.details) &&
-    error.details.length > 0
-  ) {
-    return error.details
-      .map((detail) => {
-        return (
-          detail?.message ??
-          detail?.msg
-        );
-      })
-      .filter(Boolean)
-      .join(" ");
-  }
-
-  return (
-    error?.message ??
-    "An unexpected closure error occurred."
-  );
-}
-
-function getClosureId(closure) {
-  return (
-    closure?.id ??
-    closure?.closureId ??
-    closure?.closure_id ??
-    null
-  );
-}
-
-function getReportId(closure) {
-  return (
-    closure?.observationReportId ??
-    closure?.observation_report_id ??
-    null
-  );
-}
-
-function createFormValues(closure) {
   return {
-    actionPlan:
-      closure?.actionPlan ??
-      closure?.action_plan ??
-      "",
-
-    targetDate:
-      getDateInputValue(
-        closure?.targetDate ??
-        closure?.target_date,
-      ),
-
-    responsibleHodName:
-      closure?.responsibleHodName ??
-      closure?.responsible_hod_name ??
-      "",
+    closure,
+    photograph,
+    loading,
+    error,
+    reload: load,
   };
 }
 
-export default function useClosures() {
-  const {
-    user,
-  } = useAuth();
+/**
+ * Action plan state for one closure.
+ *
+ * After a rejection the server returns a null action plan with the
+ * target date intact, so the form opens with an empty plan field and
+ * the original commitment still in place.
+ */
+export function useClosureForm(closure) {
+  const [values, setValues] = useState({
+    actionPlan: "",
+    targetDate: "",
+    responsibleHodName: "",
+  });
 
-  const isEhsOfficer =
-    hasRole(
-      user,
-      "EHS_OFFICER",
-    );
-
-  const [closure, setClosure] =
-    useState(null);
-
-  const [
-    pendingApprovals,
-    setPendingApprovals,
-  ] = useState([]);
-
-  const [
-    selectedApprovalId,
-    setSelectedApprovalId,
-  ] = useState(null);
-
-  const [formValues, setFormValues] =
-    useState(INITIAL_FORM_VALUES);
-
-  const [loading, setLoading] =
-    useState(true);
-
-  const [saving, setSaving] =
-    useState(false);
-
+  const [saving, setSaving] = useState(false);
   const [submitting, setSubmitting] =
     useState(false);
-
-  const [approving, setApproving] =
-    useState(false);
-
-  const [rejecting, setRejecting] =
-    useState(false);
-
-  const [error, setError] =
-    useState("");
-
-  const [
-    successMessage,
-    setSuccessMessage,
-  ] = useState("");
-
-  const [
-    photographPreview,
-    setPhotographPreview,
-  ] = useState("");
-
-  const [
-    photographLoading,
-    setPhotographLoading,
-  ] = useState(false);
-
-  const [
-    photographError,
-    setPhotographError,
-  ] = useState("");
-
-  const photographPreviewRef =
-    useRef("");
-
-  const clearPhotographPreview =
-    useCallback(() => {
-      if (
-        photographPreviewRef.current
-      ) {
-        URL.revokeObjectURL(
-          photographPreviewRef.current,
-        );
-
-        photographPreviewRef.current = "";
-      }
-
-      setPhotographPreview("");
-      setPhotographError("");
-    }, []);
-
-  const loadPhotograph =
-    useCallback(
-      async (currentClosure) => {
-        clearPhotographPreview();
-
-        const reportId =
-          getReportId(
-            currentClosure,
-          );
-
-        const hasPhotograph =
-          Boolean(
-            currentClosure
-              ?.photographPath ??
-            currentClosure
-              ?.photograph_path ??
-            currentClosure
-              ?.photographOriginalName ??
-            currentClosure
-              ?.photograph_original_name,
-          );
-
-        if (
-          !reportId ||
-          !hasPhotograph
-        ) {
-          return;
-        }
-
-        setPhotographLoading(true);
-
-        try {
-          const photographBlob =
-            await fetchObservationPhotograph(
-              reportId,
-            );
-
-          const previewUrl =
-            URL.createObjectURL(
-              photographBlob,
-            );
-
-          photographPreviewRef.current =
-            previewUrl;
-
-          setPhotographPreview(
-            previewUrl,
-          );
-        } catch (requestError) {
-          setPhotographError(
-            getErrorMessage(
-              requestError,
-            ),
-          );
-        } finally {
-          setPhotographLoading(false);
-        }
-      },
-      [clearPhotographPreview],
-    );
-
-  const loadClosures =
-    useCallback(async () => {
-      setLoading(true);
-      setError("");
-      setSuccessMessage("");
-
-      try {
-        if (isEhsOfficer) {
-          const result =
-            await fetchPendingApprovals();
-
-          const approvals =
-            Array.isArray(
-              result?.closures,
-            )
-              ? result.closures
-              : [];
-
-          setPendingApprovals(
-            approvals,
-          );
-
-          const selectedClosure =
-            approvals.find(
-              (item) => {
-                return (
-                  String(
-                    getClosureId(item),
-                  ) ===
-                  String(
-                    selectedApprovalId,
-                  )
-                );
-              },
-            ) ??
-            approvals[0] ??
-            null;
-
-          setClosure(
-            selectedClosure,
-          );
-
-          setSelectedApprovalId(
-            getClosureId(
-              selectedClosure,
-            ),
-          );
-
-          setFormValues(
-            createFormValues(
-              selectedClosure,
-            ),
-          );
-
-          await loadPhotograph(
-            selectedClosure,
-          );
-
-          return;
-        }
-
-        const result =
-          await fetchCurrentClosure();
-
-        const currentClosure =
-          result?.closure ?? null;
-
-        setClosure(currentClosure);
-        setPendingApprovals([]);
-        setFormValues(
-          createFormValues(
-            currentClosure,
-          ),
-        );
-
-        await loadPhotograph(
-          currentClosure,
-        );
-      } catch (requestError) {
-        setClosure(null);
-        setPendingApprovals([]);
-
-        setError(
-          getErrorMessage(requestError),
-        );
-      } finally {
-        setLoading(false);
-      }
-    }, [
-      isEhsOfficer,
-      loadPhotograph,
-      selectedApprovalId,
-    ]);
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    loadClosures();
-  }, [loadClosures]);
+    setValues({
+      actionPlan: closure?.actionPlan ?? "",
+      targetDate: toDateInputValue(
+        closure?.targetDate,
+      ),
+      responsibleHodName:
+        closure?.responsibleHodName ?? "",
+    });
 
-  useEffect(() => {
-    return () => {
-      if (
-        photographPreviewRef.current
-      ) {
-        URL.revokeObjectURL(
-          photographPreviewRef.current,
-        );
-      }
-    };
-  }, []);
-
-  const selectApproval =
-    useCallback(
-      async (closureId) => {
-        const selectedClosure =
-          pendingApprovals.find(
-            (item) => {
-              return (
-                String(
-                  getClosureId(item),
-                ) ===
-                String(closureId)
-              );
-            },
-          );
-
-        if (!selectedClosure) {
-          return;
-        }
-
-        setSelectedApprovalId(
-          closureId,
-        );
-
-        setClosure(
-          selectedClosure,
-        );
-
-        setFormValues(
-          createFormValues(
-            selectedClosure,
-          ),
-        );
-
-        setError("");
-        setSuccessMessage("");
-
-        await loadPhotograph(
-          selectedClosure,
-        );
-      },
-      [
-        loadPhotograph,
-        pendingApprovals,
-      ],
-    );
+    setError("");
+  }, [
+    closure?.id,
+    closure?.actionPlan,
+    closure?.targetDate,
+    closure?.responsibleHodName,
+  ]);
 
   const updateField = useCallback(
-    (fieldName, fieldValue) => {
+    (name, value) => {
       setError("");
-      setSuccessMessage("");
 
       if (
-        fieldName ===
-          "actionPlan" &&
-        countWords(fieldValue) >
+        name === "actionPlan" &&
+        countWords(value) >
           MAX_ACTION_PLAN_WORDS
       ) {
         setError(
-          "Action plan cannot exceed 255 words.",
+          `Action plan cannot exceed ${MAX_ACTION_PLAN_WORDS} words.`,
         );
 
         return;
       }
 
-      setFormValues(
-        (currentValues) => ({
-          ...currentValues,
-          fieldValue,
-        }),
-      );
+      /*
+       * This used to spread a variable named fieldValue, creating a key
+       * literally called "fieldValue", so the controlled inputs could
+       * never be typed into.
+       */
+      setValues((current) => ({
+        ...current,
+        [name]: value,
+      }));
     },
     [],
   );
 
-  const saveActionPlan =
-    useCallback(async () => {
-      if (
-        saving ||
-        submitting
-      ) {
-        return null;
-      }
+  const save = useCallback(async () => {
+    if (saving || submitting) {
+      return null;
+    }
 
-      const closureId =
-        getClosureId(closure);
+    if (
+      !values.actionPlan.trim() ||
+      !values.targetDate ||
+      !values.responsibleHodName.trim()
+    ) {
+      setError(
+        "Complete the action plan, target date, and responsible HOD name.",
+      );
 
-      if (!closureId) {
-        setError(
-          "No closure assignment is available.",
-        );
+      return null;
+    }
 
-        return null;
-      }
+    setSaving(true);
+    setError("");
 
-      if (
-        !formValues.actionPlan.trim() ||
-        !formValues.targetDate ||
-        !formValues
-          .responsibleHodName
-          .trim()
-      ) {
-        setError(
-          "Complete the action plan, target date, and responsible HOD name.",
-        );
+    try {
+      return await saveClosureActionPlan({
+        closureId: closure.id,
+        actionPlan: values.actionPlan,
+        targetDate: values.targetDate,
+        responsibleHodName:
+          values.responsibleHodName,
+      });
+    } catch (requestError) {
+      setError(getErrorMessage(requestError));
+      return null;
+    } finally {
+      setSaving(false);
+    }
+  }, [closure, values, saving, submitting]);
 
-        return null;
-      }
+  const sendForApproval = useCallback(async () => {
+    if (saving || submitting) {
+      return null;
+    }
 
-      setSaving(true);
-      setError("");
-      setSuccessMessage("");
+    setSubmitting(true);
+    setError("");
 
-      try {
-        const result =
-          await saveClosureActionPlan({
-            closureId,
-
-            actionPlan:
-              formValues
-                .actionPlan
-                .trim(),
-
-            targetDate:
-              formValues.targetDate,
-
-            responsibleHodName:
-              formValues
-                .responsibleHodName
-                .trim(),
-          });
-
-        const updatedClosure =
-          result?.closure ?? closure;
-
-        setClosure(
-          updatedClosure,
-        );
-
-        setFormValues(
-          createFormValues(
-            updatedClosure,
-          ),
-        );
-
-        setSuccessMessage(
-          result?.message ??
-            "Action plan saved successfully.",
-        );
-
-        return result;
-      } catch (requestError) {
-        setError(
-          getErrorMessage(requestError),
-        );
-
-        return null;
-      } finally {
-        setSaving(false);
-      }
-    }, [
-      closure,
-      formValues,
-      saving,
-      submitting,
-    ]);
-
-  const sendForClosure =
-    useCallback(async () => {
-      if (
-        saving ||
-        submitting
-      ) {
-        return null;
-      }
-
-      const closureId =
-        getClosureId(closure);
-
-      if (!closureId) {
-        setError(
-          "No closure assignment is available.",
-        );
-
-        return null;
-      }
-
-      setSubmitting(true);
-      setError("");
-      setSuccessMessage("");
-
-      try {
-        const result =
-          await submitClosureReport({
-            closureId,
-          });
-
-        setClosure(
-          result?.closure ??
-          closure,
-        );
-
-        setSuccessMessage(
-          result?.message ??
-            "Report sent for closure successfully.",
-        );
-
-        return result;
-      } catch (requestError) {
-        setError(
-          getErrorMessage(requestError),
-        );
-
-        return null;
-      } finally {
-        setSubmitting(false);
-      }
-    }, [
-      closure,
-      saving,
-      submitting,
-    ]);
-
-  const approveClosure =
-    useCallback(
-      async ({
-        reviewComments,
-      } = {}) => {
-        if (
-          approving ||
-          rejecting
-        ) {
-          return null;
-        }
-
-        const closureId =
-          getClosureId(closure);
-
-        if (!closureId) {
-          setError(
-            "No closure report is selected.",
-          );
-
-          return null;
-        }
-
-        setApproving(true);
-        setError("");
-        setSuccessMessage("");
-
-        try {
-          const result =
-            await approveClosureReport({
-              closureId,
-
-              reviewComments:
-                String(
-                  reviewComments ?? "",
-                ).trim(),
-            });
-
-          setPendingApprovals(
-            (currentApprovals) => {
-              return currentApprovals.filter(
-                (item) => {
-                  return (
-                    String(
-                      getClosureId(item),
-                    ) !==
-                    String(closureId)
-                  );
-                },
-              );
-            },
-          );
-
-          setClosure(null);
-          setSelectedApprovalId(null);
-
-          setSuccessMessage(
-            result?.message ??
-              "Closure approved successfully.",
-          );
-
-          await loadClosures();
-
-          return result;
-        } catch (requestError) {
-          setError(
-            getErrorMessage(
-              requestError,
-            ),
-          );
-
-          return null;
-        } finally {
-          setApproving(false);
-        }
-      },
-      [
-        approving,
-        closure,
-        loadClosures,
-        rejecting,
-      ],
-    );
-
-  const rejectClosure =
-    useCallback(
-      async ({
-        reviewComments,
-      } = {}) => {
-        if (
-          approving ||
-          rejecting
-        ) {
-          return null;
-        }
-
-        const normalizedComments =
-          String(
-            reviewComments ?? "",
-          ).trim();
-
-        if (!normalizedComments) {
-          setError(
-            "Review comments are required when sending the report back.",
-          );
-
-          return null;
-        }
-
-        const closureId =
-          getClosureId(closure);
-
-        if (!closureId) {
-          setError(
-            "No closure report is selected.",
-          );
-
-          return null;
-        }
-
-        setRejecting(true);
-        setError("");
-        setSuccessMessage("");
-
-        try {
-          const result =
-            await rejectClosureReport({
-              closureId,
-
-              reviewComments:
-                normalizedComments,
-            });
-
-          setPendingApprovals(
-            (currentApprovals) => {
-              return currentApprovals.filter(
-                (item) => {
-                  return (
-                    String(
-                      getClosureId(item),
-                    ) !==
-                    String(closureId)
-                  );
-                },
-              );
-            },
-          );
-
-          setClosure(null);
-          setSelectedApprovalId(null);
-
-          setSuccessMessage(
-            result?.message ??
-              "Closure report sent back for re-examination.",
-          );
-
-          await loadClosures();
-
-          return result;
-        } catch (requestError) {
-          setError(
-            getErrorMessage(
-              requestError,
-            ),
-          );
-
-          return null;
-        } finally {
-          setRejecting(false);
-        }
-      },
-      [
-        approving,
-        closure,
-        loadClosures,
-        rejecting,
-      ],
-    );
+    try {
+      return await submitClosureReport(
+        closure.id,
+      );
+    } catch (requestError) {
+      setError(getErrorMessage(requestError));
+      return null;
+    } finally {
+      setSubmitting(false);
+    }
+  }, [closure, saving, submitting]);
 
   return {
-    isEhsOfficer,
-
-    closure,
-    pendingApprovals,
-    selectedApprovalId,
-    formValues,
-
-    photographPreview,
-    photographLoading,
-    photographError,
-
-    actionPlanWordCount:
-      countWords(
-        formValues.actionPlan,
-      ),
-
+    values,
+    actionPlanWordCount: countWords(
+      values.actionPlan,
+    ),
     maxActionPlanWords:
       MAX_ACTION_PLAN_WORDS,
-
-    loading,
     saving,
     submitting,
-    approving,
-    rejecting,
     error,
-    successMessage,
-
-    selectApproval,
     updateField,
-    saveActionPlan,
-    sendForClosure,
-    approveClosure,
-    rejectClosure,
-    reload: loadClosures,
+    save,
+    sendForApproval,
+  };
+}
+
+/**
+ * The EHS Officer's review queue.
+ */
+export function useApprovalQueue() {
+  const [closures, setClosures] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError("");
+
+    try {
+      const result =
+        await fetchPendingApprovals();
+
+      setClosures(result?.closures ?? []);
+    } catch (requestError) {
+      setError(getErrorMessage(requestError));
+      setClosures([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const review = useCallback(
+    async (closureId, reviewComments, approve) => {
+      if (busy) {
+        return null;
+      }
+
+      setBusy(true);
+      setError("");
+
+      try {
+        const result = approve
+          ? await approveClosureReport({
+              closureId,
+              reviewComments,
+            })
+          : await rejectClosureReport({
+              closureId,
+              reviewComments,
+            });
+
+        await load();
+        return result;
+      } catch (requestError) {
+        setError(getErrorMessage(requestError));
+        return null;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [busy, load],
+  );
+
+  return {
+    closures,
+    loading,
+    error,
+    busy,
+    reload: load,
+    approve: (id, comments) =>
+      review(id, comments, true),
+    reject: (id, comments) =>
+      review(id, comments, false),
   };
 }

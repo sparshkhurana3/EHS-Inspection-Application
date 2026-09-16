@@ -1,0 +1,15 @@
+node_modules/
+dist/
+build/
+
+# Secrets and per-environment config
+.env
+.env.local
+*.env.local
+
+# Runtime artefacts
+backend/uploads/
+*.log
+npm-debug.log*
+
+.DS_Store

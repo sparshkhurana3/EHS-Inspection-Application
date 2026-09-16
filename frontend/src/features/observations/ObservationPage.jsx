@@ -1,278 +1,212 @@
-import Alert
-  from "../../components/Alert.jsx";
+import { useMemo } from "react";
+import { useSearchParams } from "react-router-dom";
 
-import LoadingSpinner
-  from "../../components/LoadingSpinner.jsx";
+import Alert from "../../components/Alert.jsx";
+import LoadingSpinner from "../../components/LoadingSpinner.jsx";
 
-import ObservationCard
-  from "./ObservationCard.jsx";
+import { formatDate } from "../../lib/errorMessage.js";
 
-import useObservations
-  from "./useObservations.js";
+import ObservationCard from "./ObservationCard.jsx";
+import ObservationDetail from "./ObservationDetail.jsx";
 
-function getReportStatus(report) {
-  const status = String(
-    report?.status ?? "",
-  ).toUpperCase();
+import {
+  PendingObservationList,
+  SubmittedObservationList,
+} from "./ObservationList.jsx";
 
-  if (
-    status === "CLOSED" ||
-    status === "COMPLETED" ||
-    status === "APPROVED"
-  ) {
-    return {
-      label: "Closed",
-      className:
-        "observation-report-status-closed",
-    };
-  }
+import {
+  useObservationForm,
+  useWeeklyObservations,
+} from "./useObservations.js";
 
-  return {
-    label: "In Progress",
-    className:
-      "observation-report-status-progress",
-  };
-}
-
-function formatDate(dateValue) {
-  if (!dateValue) {
-    return "Not available";
-  }
-
-  const date = new Date(dateValue);
-
-  if (Number.isNaN(date.getTime())) {
-    return String(dateValue);
-  }
-
-  return new Intl.DateTimeFormat(
-    "en-IN",
-    {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    },
-  ).format(date);
-}
-
-function ExistingReportCard({
-  report,
+/**
+ * Form for one pending patrol. Kept as its own component so the form
+ * hook mounts and resets with the assignment rather than living for the
+ * lifetime of the page.
+ */
+function ObservationFormPanel({
   assignment,
+  onDone,
+  onCancel,
 }) {
-  const reportStatus =
-    getReportStatus(report);
+  const form = useObservationForm(assignment);
 
-  const weekNumber =
-    assignment?.weekNumber ??
-    assignment?.week_number ??
-    "Not available";
+  async function handleSubmit() {
+    const result = await form.submit();
 
-  const unitName =
-    assignment?.unitNumber ??
-    assignment?.unit_number ??
-    assignment?.unitName ??
-    assignment?.unit_name ??
-    "Not available";
-
-  const zoneName =
-    assignment?.zoneNumber ??
-    assignment?.zone_number ??
-    assignment?.zoneName ??
-    assignment?.zone_name ??
-    "Not available";
+    if (result) {
+      onDone();
+    }
+  }
 
   return (
-    <section className="existing-observation-card">
-      <header className="observation-section-header">
-        <div>
-          <span className="dashboard-eyebrow">
-            Patrol Observation Report
-          </span>
-
-          <h2>Observation submitted</h2>
-        </div>
-
-        <span
-          className={[
-            "observation-report-status",
-            reportStatus.className,
-          ].join(" ")}
+    <>
+      {form.error ? (
+        <Alert
+          type="error"
+          title="Unable to send the observation"
         >
-          {reportStatus.label}
-        </span>
-      </header>
+          {form.error}
+        </Alert>
+      ) : null}
 
-      <div className="existing-report-grid">
-        <div>
-          <span>Report number</span>
-
-          <strong>
-            {report.reportNumber ??
-              report.report_number ??
-              report.id ??
-              "Not available"}
-          </strong>
-        </div>
-
-        <div>
-          <span>Week number</span>
-          <strong>{weekNumber}</strong>
-        </div>
-
-        <div>
-          <span>Unit</span>
-          <strong>{unitName}</strong>
-        </div>
-
-        <div>
-          <span>Zone</span>
-          <strong>{zoneName}</strong>
-        </div>
-
-        <div>
-          <span>Submitted date</span>
-
-          <strong>
-            {formatDate(
-              report.submittedAt ??
-                report.submitted_at,
-            )}
-          </strong>
-        </div>
-
-        <div>
-          <span>Report status</span>
-
-          <strong>
-            {reportStatus.label}
-          </strong>
-        </div>
-      </div>
-
-      <p className="existing-report-message">
-        {reportStatus.label === "Closed"
-          ? "The observation report has been closed."
-          : "The observation report has been sent to the auditee and remains in progress until the closure workflow is completed."}
-      </p>
-    </section>
+      <ObservationCard
+        assignment={assignment}
+        formValues={form.values}
+        descriptionWordCount={
+          form.descriptionWordCount
+        }
+        maxDescriptionWords={
+          form.maxDescriptionWords
+        }
+        submitting={form.submitting}
+        onFieldChange={form.updateField}
+        onPhotographChange={
+          form.updatePhotograph
+        }
+        onPhotographRemove={
+          form.removePhotograph
+        }
+        onSubmit={handleSubmit}
+        onCancel={onCancel}
+      />
+    </>
   );
 }
 
 export default function ObservationPage() {
+  const [searchParams, setSearchParams] =
+    useSearchParams();
+
   const {
-    assignment,
-    existingReport,
-    formValues,
-    descriptionWordCount,
-    maxDescriptionWords,
+    assignments,
+    pending,
+    submitted,
+    pendingCount,
+    submittedCount,
+    weekStartDate,
+    weekEndDate,
     loading,
-    submitting,
     error,
-    successMessage,
-    updateField,
-    updatePhotograph,
-    removePhotograph,
-    submitObservation,
     reload,
-  } = useObservations();
+  } = useWeeklyObservations();
+
+  /*
+   * Page state lives in the query string, so cards are linkable, the
+   * back button works, and the dashboard's deep links resolve.
+   */
+  const patrolId = searchParams.get("patrolId");
+  const reportId = searchParams.get("reportId");
+
+  const selectedAssignment = useMemo(
+    () =>
+      assignments.find(
+        (assignment) =>
+          String(assignment.id) ===
+          String(patrolId),
+      ) ?? null,
+    [assignments, patrolId],
+  );
+
+  function openForm(assignment) {
+    setSearchParams({
+      patrolId: String(assignment.id),
+    });
+  }
+
+  function openDetail(id) {
+    setSearchParams({ reportId: String(id) });
+  }
+
+  function backToList() {
+    setSearchParams({});
+  }
 
   if (loading) {
     return (
-      <main className="observation-page">
-        <LoadingSpinner
-          message="Loading current weekly patrol..."
-        />
-      </main>
+      <LoadingSpinner message="Loading your observations..." />
+    );
+  }
+
+  if (reportId) {
+    return (
+      <ObservationDetail
+        reportId={reportId}
+        onBack={backToList}
+      />
+    );
+  }
+
+  if (patrolId && selectedAssignment) {
+    return (
+      <ObservationFormPanel
+        assignment={selectedAssignment}
+        onCancel={backToList}
+        onDone={() => {
+          backToList();
+          reload();
+        }}
+      />
     );
   }
 
   return (
-    <main className="observation-page">
-      <header className="observation-page-header">
+    <section className="observation-page">
+      <header className="observation-section-header">
         <div>
           <span className="dashboard-eyebrow">
             Auditor workflow
           </span>
 
-          <h1>Observation</h1>
+          <h1>Observations</h1>
 
-          <p>
-            Add and monitor the Patrol
-            Observation Report for the current
-            assigned weekly audit.
-          </p>
+          {weekStartDate ? (
+            <p>
+              Week of{" "}
+              {formatDate(weekStartDate)} to{" "}
+              {formatDate(weekEndDate)}
+            </p>
+          ) : null}
         </div>
 
         <button
           type="button"
-          className="dashboard-refresh-button"
+          className="button button-secondary"
           onClick={reload}
-          disabled={submitting}
         >
           Refresh
         </button>
       </header>
 
-      {error && (
+      {error ? (
         <Alert
           type="error"
-          title="Unable to continue"
+          title="Unable to load your observations"
         >
           {error}
         </Alert>
-      )}
+      ) : null}
 
-      {successMessage && (
-        <Alert
-          type="success"
-          title="Observation submitted"
-        >
-          {successMessage}
+      {patrolId && !selectedAssignment ? (
+        <Alert type="warning">
+          That audit is not in your list for this
+          week.
         </Alert>
-      )}
+      ) : null}
 
-      {!assignment && !error && (
-        <section className="empty-dashboard-card">
-          <strong>
-            No current auditor assignment
-          </strong>
+      <h2>Pending ({pendingCount})</h2>
 
-          <p>
-            There is no weekly patrol assigned
-            to you as an auditor that requires
-            an observation report.
-          </p>
-        </section>
-      )}
+      <PendingObservationList
+        assignments={pending}
+        onOpen={openForm}
+      />
 
-      {assignment && existingReport && (
-        <ExistingReportCard
-          report={existingReport}
-          assignment={assignment}
-        />
-      )}
+      <h2>Submitted ({submittedCount})</h2>
 
-      {assignment && !existingReport && (
-        <ObservationCard
-          assignment={assignment}
-          formValues={formValues}
-          descriptionWordCount={
-            descriptionWordCount
-          }
-          maxDescriptionWords={
-            maxDescriptionWords
-          }
-          submitting={submitting}
-          onFieldChange={updateField}
-          onPhotographChange={
-            updatePhotograph
-          }
-          onPhotographRemove={
-            removePhotograph
-          }
-          onSubmit={submitObservation}
-        />
-      )}
-    </main>
+      <SubmittedObservationList
+        assignments={submitted}
+        onOpen={openDetail}
+      />
+    </section>
   );
 }

@@ -99,6 +99,34 @@ function mapClosure(row) {
 
     closedAt:
       row.closed_at,
+
+    requestedAt:
+      row.requested_at,
+
+    approvedAt:
+      row.approved_at,
+
+    approvalIteration:
+      Number(row.approval_iteration ?? 0),
+
+    reviewComments:
+      row.review_comments,
+
+    reviewedAt:
+      row.reviewed_at,
+
+    reviewedByName:
+      row.reviewed_by_name,
+
+    /*
+     * The area of the zone the finding was in, named by the auditor on
+     * the observation report.
+     */
+    zoneAreaId:
+      row.zone_area_id ?? null,
+
+    areaName:
+      row.area_name ?? null,
   };
 }
 
@@ -125,6 +153,7 @@ const CLOSURE_SELECT = `
     closure_request.status
       AS closure_status,
 
+    closure_request.requested_at,
     closure_request.action_plan,
     closure_request.target_date,
     closure_request.responsible_hod_name,
@@ -132,6 +161,11 @@ const CLOSURE_SELECT = `
     closure_request.action_plan_saved_at,
     closure_request.submitted_for_closure_at,
     closure_request.closed_at,
+    closure_request.approved_at,
+    closure_request.approval_iteration,
+    closure_request.review_comments,
+    closure_request.reviewed_at,
+    reviewer.full_name AS reviewed_by_name,
 
     observation_report.id
       AS observation_report_id,
@@ -148,6 +182,8 @@ const CLOSURE_SELECT = `
     observation_report.risk_category,
     observation_report.submitted_at
       AS observation_submitted_at,
+    observation_report.zone_area_id,
+    report_area.name AS area_name,
 
     patrol.id AS patrol_id,
     patrol.scheduled_date,
@@ -201,10 +237,29 @@ const CLOSURE_SELECT = `
   LEFT JOIN users AS ehs_officer
     ON ehs_officer.id =
        patrol.ehs_officer_id
+
+  LEFT JOIN users AS reviewer
+    ON reviewer.id = closure_request.reviewed_by
+
+  LEFT JOIN zone_areas AS report_area
+    ON report_area.id = observation_report.zone_area_id
 `;
 
-export async function findCurrentClosureForAuditee(
-  auditeeId,
+/**
+ * Every closure this auditee still owes action on, or is waiting to
+ * hear back about. Pending and lapsed are the same set split by age, so
+ * one query serves both and the service partitions on is_lapsed.
+ *
+ * Lapsed is derived rather than stored: it is a function of the clock,
+ * so a stored status would need a nightly job and would drift the
+ * moment that job failed. A closure already awaiting the officer is
+ * never lapsed, because the delay is not the auditee's.
+ */
+export async function findOpenClosuresForAuditee(
+  {
+    auditeeId,
+    lapseMonths,
+  },
   client = databasePool,
 ) {
   const result = await client.query(
@@ -216,24 +271,147 @@ export async function findCurrentClosureForAuditee(
         AND closure_request.status IN (
           'OPEN',
           'IN_PROGRESS',
-          'SUBMITTED_FOR_CLOSURE',
-          'REEXAMINATION_REQUIRED'
+          'REEXAMINATION_REQUIRED',
+          'SUBMITTED_FOR_CLOSURE'
         )
 
       ORDER BY
         CASE closure_request.status
-          WHEN 'OPEN' THEN 1
-          WHEN 'IN_PROGRESS' THEN 2
-          WHEN 'REEXAMINATION_REQUIRED' THEN 3
+          WHEN 'REEXAMINATION_REQUIRED' THEN 1
+          WHEN 'OPEN' THEN 2
+          WHEN 'IN_PROGRESS' THEN 3
           WHEN 'SUBMITTED_FOR_CLOSURE' THEN 4
           ELSE 5
         END,
+        closure_request.target_date ASC NULLS LAST,
         patrol.scheduled_date ASC,
         closure_request.id ASC
+    `,
+    [auditeeId],
+  );
+
+  const lapseBefore = new Date();
+
+  lapseBefore.setMonth(
+    lapseBefore.getMonth() - lapseMonths,
+  );
+
+  return result.rows.map((row) => {
+    const closure = mapClosure(row);
+
+    const requestedAt = row.requested_at
+      ? new Date(row.requested_at)
+      : null;
+
+    return {
+      ...closure,
+
+      isLapsed:
+        row.closure_status !==
+          "SUBMITTED_FOR_CLOSURE" &&
+        Boolean(requestedAt) &&
+        requestedAt < lapseBefore,
+    };
+  });
+}
+
+/**
+ * Closures completed in the recent past, where completed means approved
+ * by an EHS Officer.
+ *
+ * COALESCE because approved_at was added for an approval endpoint that
+ * was never built, so rows approved before it exists carry closed_at
+ * instead. Drop the COALESCE once those are backfilled.
+ */
+export async function findRecentlyCompletedClosuresForAuditee(
+  {
+    auditeeId,
+    daysBack,
+  },
+  client = databasePool,
+) {
+  const result = await client.query(
+    `
+      ${CLOSURE_SELECT}
+
+      WHERE
+        closure_request.requested_by = $1
+        AND closure_request.status = 'APPROVED'
+        AND COALESCE(
+              closure_request.approved_at,
+              closure_request.closed_at
+            ) >= NOW() - ($2 || ' days')::INTERVAL
+
+      ORDER BY
+        COALESCE(
+          closure_request.approved_at,
+          closure_request.closed_at
+        ) DESC
+    `,
+    [auditeeId, String(daysBack)],
+  );
+
+  return result.rows.map(mapClosure);
+}
+
+/**
+ * The EHS Officer's review queue: everything submitted and waiting.
+ * Scoped to patrols the officer owns, so two officers at different
+ * sites do not review each other's work.
+ */
+export async function findClosuresPendingApproval(
+  {
+    officerId,
+  },
+  client = databasePool,
+) {
+  const result = await client.query(
+    `
+      ${CLOSURE_SELECT}
+
+      WHERE
+        closure_request.status = 'SUBMITTED_FOR_CLOSURE'
+        AND (
+          patrol.ehs_officer_id = $1
+          OR patrol.ehs_officer_id IS NULL
+        )
+
+      ORDER BY
+        closure_request.submitted_for_closure_at ASC,
+        closure_request.id ASC
+    `,
+    [officerId],
+  );
+
+  return result.rows.map(mapClosure);
+}
+
+/**
+ * One closure, readable by anyone on the patrol it belongs to.
+ */
+export async function findClosureByIdForUser(
+  {
+    closureId,
+    userId,
+  },
+  client = databasePool,
+) {
+  const result = await client.query(
+    `
+      ${CLOSURE_SELECT}
+
+      WHERE
+        closure_request.id = $1
+        AND (
+          closure_request.requested_by = $2
+          OR patrol.auditor_id = $2
+          OR patrol.auditee_id = $2
+          OR patrol.ehs_officer_id = $2
+        )
 
       LIMIT 1
     `,
-    [auditeeId],
+    [closureId, userId],
   );
 
   return mapClosure(result.rows[0]);
@@ -386,5 +564,128 @@ export async function updateObservationAfterClosureSubmission(
       WHERE id = $1
     `,
     [observationReportId],
+  );
+}
+/**
+ * Approve a submitted closure.
+ *
+ * The status precondition lives in the WHERE clause, not only in the
+ * service, so two officers reviewing the same closure at once cannot
+ * both succeed and double-increment the iteration.
+ */
+export async function approveClosure(
+  {
+    closureId,
+    reviewerId,
+    reviewComments,
+  },
+  client,
+) {
+  const result = await client.query(
+    `
+      UPDATE closure_requests
+      SET
+        status = 'APPROVED',
+        reviewed_by = $2,
+        reviewed_at = NOW(),
+        review_comments = NULLIF(BTRIM($3), ''),
+        approved_at = NOW(),
+        closed_at = NOW(),
+        approval_iteration = approval_iteration + 1,
+        updated_at = NOW()
+
+      WHERE
+        id = $1
+        AND status = 'SUBMITTED_FOR_CLOSURE'
+
+      RETURNING id
+    `,
+    [closureId, reviewerId, reviewComments ?? ""],
+  );
+
+  return result.rows[0] ?? null;
+}
+
+/**
+ * Send a submitted closure back to the auditee.
+ *
+ * The action plan is cleared so it must be written again, while the
+ * target date and the responsible HOD are deliberately left alone: the
+ * original commitment should not move because the plan failed review.
+ *
+ * Clearing the plan also disables submission on its own, because
+ * canSubmitForClosure requires a non-blank plan.
+ */
+export async function rejectClosure(
+  {
+    closureId,
+    reviewerId,
+    reviewComments,
+  },
+  client,
+) {
+  const result = await client.query(
+    `
+      UPDATE closure_requests
+      SET
+        status = 'REEXAMINATION_REQUIRED',
+
+        action_plan = NULL,
+        action_plan_saved_at = NULL,
+
+        reviewed_by = $2,
+        reviewed_at = NOW(),
+        review_comments = $3,
+        approval_iteration = approval_iteration + 1,
+        updated_at = NOW()
+
+      WHERE
+        id = $1
+        AND status = 'SUBMITTED_FOR_CLOSURE'
+
+      RETURNING id
+    `,
+    [closureId, reviewerId, reviewComments],
+  );
+
+  return result.rows[0] ?? null;
+}
+
+/**
+ * Moves the patrol and its observation report in step with the review
+ * decision, so the three tables never disagree about where the work is.
+ */
+export async function applyReviewToPatrolAndReport(
+  {
+    closureId,
+    patrolStatus,
+    reportStatus,
+    closeReport,
+  },
+  client,
+) {
+  await client.query(
+    `
+      UPDATE patrols
+      SET status = $2, updated_at = NOW()
+      WHERE id = (
+        SELECT patrol_id FROM closure_requests WHERE id = $1
+      )
+    `,
+    [closureId, patrolStatus],
+  );
+
+  await client.query(
+    `
+      UPDATE observation_reports
+      SET
+        status = $2,
+        closed_at = CASE WHEN $3 THEN NOW() ELSE closed_at END,
+        updated_at = NOW()
+      WHERE id = (
+        SELECT observation_report_id FROM closure_requests WHERE id = $1
+      )
+    `,
+    [closureId, reportStatus, closeReport],
   );
 }

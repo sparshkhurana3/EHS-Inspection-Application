@@ -1,23 +1,96 @@
 import * as closureService
   from "./closure.service.js";
 
-export async function getCurrentClosure(
+export async function getAuditeeClosures(
   req,
   res,
   next,
 ) {
   try {
     const result =
-      await closureService
-        .getCurrentClosure({
-          userId: req.user.id,
-        });
+      await closureService.getAuditeeClosures({
+        userId: req.user.id,
+      });
 
     res.status(200).json(result);
   } catch (error) {
     next(error);
   }
 }
+
+export async function getPendingApprovals(
+  req,
+  res,
+  next,
+) {
+  try {
+    const result =
+      await closureService.getPendingApprovals({
+        userId: req.user.id,
+      });
+
+    res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getClosureById(
+  req,
+  res,
+  next,
+) {
+  try {
+    const result =
+      await closureService.getClosureById({
+        userId: req.user.id,
+        closureId: req.params.closureId,
+      });
+
+    res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function approveClosure(
+  req,
+  res,
+  next,
+) {
+  try {
+    const result =
+      await closureService.approveClosure({
+        userId: req.user.id,
+        closureId: req.params.closureId,
+        reviewComments: req.body.reviewComments,
+      });
+
+    res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function rejectClosure(
+  req,
+  res,
+  next,
+) {
+  try {
+    const result =
+      await closureService.rejectClosure({
+        userId: req.user.id,
+        closureId: req.params.closureId,
+        reviewComments: req.body.reviewComments,
+      });
+
+    res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
 
 export async function saveActionPlan(
   req,

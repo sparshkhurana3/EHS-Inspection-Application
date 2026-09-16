@@ -3,14 +3,6 @@ import {
   param,
 } from "express-validator";
 
-const ALLOWED_PLANT_LOCATIONS = [
-  "Gurugram",
-  "Pune",
-  "Chennai",
-  "Manesar",
-  "China",
-];
-
 const ALLOWED_CATEGORIES = [
   "UA",
   "UC",
@@ -76,17 +68,22 @@ export const createObservationValidationRules = [
     )
     .toDate(),
 
-  body("location")
-    .trim()
+  /*
+   * A patrol covers the whole zone, so the auditor names the area the
+   * finding was in. The service checks it belongs to this patrol's zone;
+   * the plant location is derived from the patrol, never submitted.
+   */
+  body("zoneAreaId")
     .notEmpty()
     .withMessage(
-      "Plant location is required.",
+      "Select the area where the observation was made.",
     )
     .bail()
-    .isIn(ALLOWED_PLANT_LOCATIONS)
+    .isInt({ min: 1 })
     .withMessage(
-      "Plant location must be Gurugram, Pune, Chennai, Manesar, or China.",
-    ),
+      "Area must be a positive integer.",
+    )
+    .toInt(),
 
   body("category")
     .trim()

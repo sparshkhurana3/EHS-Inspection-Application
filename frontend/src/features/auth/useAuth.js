@@ -8,15 +8,15 @@ import {
   signupUser,
 } from "./auth.service.js";
 
-import { useAuthenticatedUser, } from "../../app/authProvider.jsx"
+import { useAuthenticatedUser } from "../../app/authProvider.jsx";
 
-const ACCESS_TOKEN_KEY = "ehs_access_token";
-const USER_STORAGE_KEY = "ehs_user";
+import { getErrorMessage as getAuthenticationErrorMessage } from "../../lib/errorMessage.js";
 
 /**
- * Stores the authenticated user and access token.
+ * The provider owns persistence; this only checks the server actually
+ * returned a session before we try to start one.
  */
-function saveAuthentication(authenticationResult) {
+function assertAuthentication(authenticationResult) {
   if (!authenticationResult?.token) {
     throw new Error(
       "The authentication server did not return an access token.",
@@ -28,51 +28,6 @@ function saveAuthentication(authenticationResult) {
       "The authentication server did not return user information.",
     );
   }
-
-  localStorage.setItem(
-    ACCESS_TOKEN_KEY,
-    authenticationResult.token,
-  );
-
-  localStorage.setItem(
-    USER_STORAGE_KEY,
-    JSON.stringify(authenticationResult.user),
-  );
-}
-
-/**
- * Converts API or network errors into messages suitable
- * for display on the sign-in and sign-up pages.
- */
-function getAuthenticationErrorMessage(error) {
-  if (
-    error instanceof TypeError &&
-    error.message === "Failed to fetch"
-  ) {
-    return (
-      "Unable to connect to the EHS API. " +
-      "Check that the backend is running and accessible."
-    );
-  }
-
-  if (
-    Array.isArray(error?.details) &&
-    error.details.length > 0
-  ) {
-    return error.details
-      .map((detail) => detail.message)
-      .filter(Boolean)
-      .join(" ");
-  }
-
-  if (
-    error instanceof Error &&
-    error.message
-  ) {
-    return error.message;
-  }
-
-  return "An unexpected authentication error occurred.";
 }
 
 /**
@@ -110,7 +65,7 @@ export default function useAuth() {
           password,
         });
 
-        saveAuthentication(result);
+        assertAuthentication(result);
 
         setAuthenticatedUser(result.user, result.token);
 
@@ -172,7 +127,7 @@ export default function useAuth() {
           confirmPassword,
         });
 
-        saveAuthentication(result);
+        assertAuthentication(result);
 
         setAuthenticatedUser(result.user, result.token);
 

@@ -1,207 +1,146 @@
-import Alert
-  from "../../components/Alert.jsx";
+import Alert from "../../components/Alert.jsx";
+import LoadingSpinner from "../../components/LoadingSpinner.jsx";
 
-import LoadingSpinner
-  from "../../components/LoadingSpinner.jsx";
+import { formatDate } from "../../lib/errorMessage.js";
 
-import PatrolForm
-  from "./PatrolForm.jsx";
-
-import usePatrols
-  from "./usePatrols.js";
-
-function formatDate(dateValue) {
-  if (!dateValue) {
-    return "Not available";
-  }
-
-  const date = new Date(dateValue);
-
-  if (Number.isNaN(date.getTime())) {
-    return String(dateValue);
-  }
-
-  return new Intl.DateTimeFormat(
-    "en-IN",
-    {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    },
-  ).format(date);
-}
+import PatrolForm from "./PatrolForm.jsx";
+import usePatrols from "./usePatrols.js";
 
 export default function PlanningPage() {
-  const {
-    formOpen,
-    formValues,
-    auditors,
-    auditees,
-    scheduledPatrol,
-    loading,
-    submitting,
-    error,
-    successMessage,
-    openForm,
-    closeForm,
-    updateField,
-    submitSchedule,
-    reloadLookups,
-  } = usePatrols();
+  const planning = usePatrols();
 
-  if (loading) {
+  if (planning.loading) {
     return (
-      <main className="planning-page">
-        <LoadingSpinner
-          message="Loading audit planning data..."
-        />
-      </main>
+      <LoadingSpinner message="Loading your location..." />
+    );
+  }
+
+  /*
+   * An officer with no location cannot plan anything, and an empty form
+   * would look broken rather than misconfigured.
+   */
+  if (!planning.location) {
+    return (
+      <Alert
+        type="error"
+        title="Your location is not set"
+      >
+        {planning.error ||
+          "Your account is not assigned to a location, so audits cannot be planned. Ask an administrator to set it."}
+      </Alert>
     );
   }
 
   return (
-    <main className="planning-page">
-      <header className="planning-page-header">
+    <section className="planning-page">
+      <header className="observation-section-header">
         <div>
           <span className="dashboard-eyebrow">
             EHS Officer workflow
           </span>
 
-          <h1>Audit Planning</h1>
+          <h1>Plan audits</h1>
 
-          <p>
-            Schedule an EHS audit and assign
-            the responsible auditor and
-            auditee.
-          </p>
+          <p>{planning.location.name}</p>
         </div>
 
-        <div className="planning-header-actions">
+        <div className="closure-header-actions">
           <button
             type="button"
-            className="dashboard-refresh-button"
-            onClick={reloadLookups}
-            disabled={submitting}
+            className="button button-secondary"
+            onClick={planning.reload}
+            disabled={planning.submitting}
           >
-            Refresh Users
+            Refresh
           </button>
 
-          {!formOpen && (
+          {!planning.formOpen ? (
             <button
               type="button"
               className="button button-primary"
-              onClick={openForm}
+              onClick={planning.openForm}
             >
-              Schedule an Audit
+              Schedule an audit
             </button>
-          )}
+          ) : null}
         </div>
       </header>
 
-      {error && (
+      {planning.error ? (
         <Alert
           type="error"
-          title="Unable to schedule audit"
+          title="Unable to schedule the audit"
         >
-          {error}
+          {planning.error}
         </Alert>
-      )}
+      ) : null}
 
-      {successMessage && (
-        <Alert
-          type="success"
-          title="Audit scheduled"
-        >
-          {successMessage}
+      {planning.successMessage ? (
+        <Alert type="success" title="Audit scheduled">
+          {planning.successMessage}
         </Alert>
-      )}
+      ) : null}
 
-      {scheduledPatrol && (
-        <section className="scheduled-audit-summary">
+      {planning.scheduledPatrol ? (
+        <div className="patrol-summary">
           <div>
-            <span className="dashboard-eyebrow">
-              Latest scheduled audit
-            </span>
-
-            <h2>
-              {scheduledPatrol.location ??
-                "Audit assignment"}
-            </h2>
+            <span>Date</span>
+            <strong>
+              {formatDate(
+                planning.scheduledPatrol
+                  .scheduledDate,
+              )}
+            </strong>
           </div>
 
-          <div className="scheduled-audit-summary-grid">
-            <span>
-              <small>Date</small>
-              <strong>
-                {formatDate(
-                  scheduledPatrol
-                    .scheduledDate ??
-                  scheduledPatrol
-                    .scheduled_date,
-                )}
-              </strong>
-            </span>
-
-            <span>
-              <small>Unit</small>
-              <strong>
-                {scheduledPatrol.unit ??
-                  "Not available"}
-              </strong>
-            </span>
-
-            <span>
-              <small>Zone</small>
-              <strong>
-                {scheduledPatrol.zone ??
-                  "Not available"}
-              </strong>
-            </span>
-
-            <span>
-              <small>Status</small>
-              <strong>Scheduled</strong>
-            </span>
+          <div>
+            <span>Unit</span>
+            <strong>
+              {
+                planning.scheduledPatrol
+                  .unitName
+              }
+            </strong>
           </div>
-        </section>
-      )}
 
-      {formOpen ? (
-        <section className="patrol-planning-card">
-          <PatrolForm
-            formValues={formValues}
-            auditors={auditors}
-            auditees={auditees}
-            submitting={submitting}
-            onFieldChange={updateField}
-            onSubmit={submitSchedule}
-            onCancel={closeForm}
-          />
-        </section>
+          <div>
+            <span>Zone</span>
+            <strong>
+              {
+                planning.scheduledPatrol
+                  .zoneName
+              }
+            </strong>
+          </div>
+
+          <div>
+            <span>Status</span>
+            <strong>
+              {planning.scheduledPatrol.status}
+            </strong>
+          </div>
+        </div>
+      ) : null}
+
+      {planning.formOpen ? (
+        <PatrolForm
+          location={planning.location}
+          units={planning.units}
+          zonesForUnit={planning.zonesForUnit}
+          selectedZone={planning.selectedZone}
+          users={planning.users}
+          values={planning.values}
+          submitting={planning.submitting}
+          onFieldChange={planning.updateField}
+          onSubmit={planning.submit}
+          onCancel={planning.closeForm}
+        />
       ) : (
-        <section className="planning-empty-card">
-          <div className="planning-empty-icon">
-            +
-          </div>
-
-          <h2>Schedule a new audit</h2>
-
-          <p>
-            Create an audit assignment for an
-            auditor and auditee. The scheduled
-            audit will appear on the relevant
-            users' calendars.
-          </p>
-
-          <button
-            type="button"
-            className="button button-primary"
-            onClick={openForm}
-          >
-            Schedule an Audit
-          </button>
-        </section>
+        <p className="closure-empty-note">
+          Use Schedule an audit to plan a patrol
+          for your location.
+        </p>
       )}
-    </main>
+    </section>
   );
 }

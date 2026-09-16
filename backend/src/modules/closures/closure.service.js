@@ -56,21 +56,19 @@ function getCurrentLocalDate() {
   return `${year}-${month}-${day}`;
 }
 
+/*
+ * Before completion the auditee sees only two labels: a closure waiting
+ * on the EHS Officer reads "Pending Approval", anything else reads
+ * "Open".
+ *
+ * Only the label collapses. IN_PROGRESS and REEXAMINATION_REQUIRED stay
+ * distinct in the database because they drive different behaviour:
+ * whether submit is enabled, and whether this is a first attempt or a
+ * rework. Merging them would break the approval loop.
+ */
 function getDisplayStatus(status) {
   const normalizedStatus =
     normalizeStatus(status);
-
-  if (normalizedStatus === "OPEN") {
-    return "Open";
-  }
-
-  if (
-    normalizedStatus === "IN_PROGRESS" ||
-    normalizedStatus ===
-      "REEXAMINATION_REQUIRED"
-  ) {
-    return "In Progress";
-  }
 
   if (
     normalizedStatus ===
@@ -78,17 +76,17 @@ function getDisplayStatus(status) {
     normalizedStatus ===
       "PENDING_EHS_APPROVAL"
   ) {
-    return "Sent for Closure";
+    return "Pending Approval";
   }
 
   if (
     normalizedStatus === "APPROVED" ||
     normalizedStatus === "CLOSED"
   ) {
-    return "Closed";
+    return "Completed";
   }
 
-  return status || "Not available";
+  return "Open";
 }
 
 function createClosureResponse(closure) {
@@ -132,6 +130,14 @@ function createClosureResponse(closure) {
       normalizedStatus ===
         "IN_PROGRESS" &&
       hasCompleteActionPlan,
+
+    /*
+     * A returned closure reads "Open", exactly like one never touched,
+     * so the card needs a second signal to show rework is expected.
+     */
+    wasReturned:
+      normalizedStatus ===
+      "REEXAMINATION_REQUIRED",
   };
 }
 
@@ -203,27 +209,258 @@ function validateActionPlanInput({
   }
 }
 
-export async function getCurrentClosure({
-  userId,
-}) {
+/*
+ * Window sizes live here so "6 months" and "1 week" are changed in one
+ * place rather than scattered through the queries.
+ */
+const PENDING_WINDOW_MONTHS = 6;
+const COMPLETED_WINDOW_DAYS = 7;
+
+/**
+ * The auditee's Closure page in one response: what they still owe,
+ * what has lapsed, and what was completed in the last week.
+ */
+export async function getAuditeeClosures({ userId }) {
   if (!userId) {
     throw new AppError(
-      "An authenticated user is required.",
+      "Authentication is required.",
       401,
       "AUTHENTICATION_REQUIRED",
     );
   }
 
-  const closure =
-    await closureRepository
-      .findCurrentClosureForAuditee(
-        userId,
-      );
+  const [openClosures, completedClosures] =
+    await Promise.all([
+      closureRepository
+        .findOpenClosuresForAuditee({
+          auditeeId: userId,
+          lapseMonths: PENDING_WINDOW_MONTHS,
+        }),
+
+      closureRepository
+        .findRecentlyCompletedClosuresForAuditee({
+          auditeeId: userId,
+          daysBack: COMPLETED_WINDOW_DAYS,
+        }),
+    ]);
+
+  const decorated = openClosures.map(
+    (closure) => ({
+      ...createClosureResponse(closure),
+      isLapsed: closure.isLapsed === true,
+    }),
+  );
+
+  const pending = decorated.filter(
+    (closure) => !closure.isLapsed,
+  );
+
+  const lapsed = decorated.filter(
+    (closure) => closure.isLapsed,
+  );
+
+  const completed = completedClosures.map(
+    (closure) => ({
+      ...createClosureResponse(closure),
+      isLapsed: false,
+    }),
+  );
 
   return {
-    closure:
-      createClosureResponse(closure),
+    pendingWindowMonths:
+      PENDING_WINDOW_MONTHS,
+
+    completedWindowDays:
+      COMPLETED_WINDOW_DAYS,
+
+    pendingCount: pending.length,
+    lapsedCount: lapsed.length,
+    completedCount: completed.length,
+
+    pending,
+    lapsed,
+    completed,
   };
+}
+
+/**
+ * One closure with its observation report, for the detail view.
+ */
+export async function getClosureById({
+  userId,
+  closureId,
+}) {
+  const closure =
+    await closureRepository
+      .findClosureByIdForUser({
+        closureId,
+        userId,
+      });
+
+  if (!closure) {
+    throw new AppError(
+      "The closure was not found.",
+      404,
+      "CLOSURE_ASSIGNMENT_NOT_FOUND",
+    );
+  }
+
+  return {
+    closure: createClosureResponse(closure),
+  };
+}
+
+/**
+ * The EHS Officer's review queue.
+ */
+export async function getPendingApprovals({ userId }) {
+  const closures =
+    await closureRepository
+      .findClosuresPendingApproval({
+        officerId: userId,
+      });
+
+  return {
+    closures: closures.map(
+      createClosureResponse,
+    ),
+  };
+}
+
+/**
+ * Approve or send back a submitted closure.
+ *
+ * Nothing else can complete a closure: approval by an EHS Officer is
+ * the only path to APPROVED, and it moves the observation report and
+ * the patrol in the same transaction so the three never disagree.
+ */
+async function reviewClosure({
+  userId,
+  closureId,
+  reviewComments,
+  approve,
+}) {
+  if (!approve) {
+    const comments = String(
+      reviewComments ?? "",
+    ).trim();
+
+    if (!comments) {
+      throw new AppError(
+        "Review comments are required when sending a report back for re-examination.",
+        400,
+        "REVIEW_COMMENTS_REQUIRED",
+      );
+    }
+  }
+
+  await withTransaction(async (client) => {
+    const existing =
+      await closureRepository
+        .findClosureByIdForUser(
+          { closureId, userId },
+          client,
+        );
+
+    if (!existing) {
+      throw new AppError(
+        "The closure was not found.",
+        404,
+        "CLOSURE_ASSIGNMENT_NOT_FOUND",
+      );
+    }
+
+    if (
+      normalizeStatus(existing.status) !==
+      "SUBMITTED_FOR_CLOSURE"
+    ) {
+      throw new AppError(
+        "This closure is not awaiting approval.",
+        409,
+        "CLOSURE_NOT_AWAITING_APPROVAL",
+      );
+    }
+
+    const updated = approve
+      ? await closureRepository.approveClosure(
+          {
+            closureId,
+            reviewerId: userId,
+            reviewComments,
+          },
+          client,
+        )
+      : await closureRepository.rejectClosure(
+          {
+            closureId,
+            reviewerId: userId,
+            reviewComments: String(
+              reviewComments ?? "",
+            ).trim(),
+          },
+          client,
+        );
+
+    /*
+     * Null means another reviewer got there first: the WHERE clause no
+     * longer matched. Fail rather than reporting a decision that was
+     * not recorded.
+     */
+    if (!updated) {
+      throw new AppError(
+        "This closure was reviewed by someone else. Reload and try again.",
+        409,
+        "CLOSURE_STATUS_CHANGED",
+      );
+    }
+
+    await closureRepository
+      .applyReviewToPatrolAndReport(
+        {
+          closureId,
+
+          patrolStatus: approve
+            ? "COMPLETED"
+            : "REEXAMINATION_REQUIRED",
+
+          reportStatus: approve
+            ? "CLOSED"
+            : "REEXAMINATION_REQUIRED",
+
+          closeReport: approve,
+        },
+        client,
+      );
+  });
+
+  const closure =
+    await closureRepository
+      .findClosureByIdForUser({
+        closureId,
+        userId,
+      });
+
+  return {
+    message: approve
+      ? "Closure approved."
+      : "Closure sent back for re-examination.",
+
+    closure: createClosureResponse(closure),
+  };
+}
+
+export async function approveClosure(input) {
+  return reviewClosure({
+    ...input,
+    approve: true,
+  });
+}
+
+export async function rejectClosure(input) {
+  return reviewClosure({
+    ...input,
+    approve: false,
+  });
 }
 
 export async function saveActionPlan({
