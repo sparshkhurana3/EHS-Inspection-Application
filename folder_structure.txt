@@ -1,0 +1,120 @@
+.
+├── backend
+│   ├── database
+│   │   ├── init.sql
+│   │   ├── migrations
+│   │   │   ├── 001_create_auth_tables.sql
+│   │   │   ├── 002_create_patrol_dashboard_tables.sql
+│   │   │   ├── 003_create_observation_fields.sql
+│   │   │   └── 004_extend_closure_workflow.sql
+│   │   └── seeds
+│   │       ├── 000_create_required_test_users.sql
+│   │       └── 001_dashboard_observation_test_data.sql
+│   ├── .env
+│   ├── .env.example
+│   ├── package.json
+│   ├── package-lock.json
+│   ├── src
+│   │   ├── app.js
+│   │   ├── config
+│   │   │   ├── database.js
+│   │   │   ├── environment.js
+│   │   │   └── logger.js
+│   │   ├── middleware
+│   │   │   ├── authenticate.js
+│   │   │   ├── authorize.js
+│   │   │   ├── errorHandler.js
+│   │   │   └── validate.js
+│   │   ├── modules
+│   │   │   ├── auth
+│   │   │   │   ├── auth.controller.js
+│   │   │   │   ├── auth.repository.js
+│   │   │   │   ├── auth.routes.js
+│   │   │   │   ├── auth.service.js
+│   │   │   │   └── auth.validator.js
+│   │   │   ├── closures
+│   │   │   │   ├── closure.controller.js
+│   │   │   │   ├── closure.repository.js
+│   │   │   │   ├── closure.routes.js
+│   │   │   │   ├── closure.service.js
+│   │   │   │   └── closure.validator.js
+│   │   │   ├── dashboard
+│   │   │   │   ├── dashboard.controller.js
+│   │   │   │   ├── dashboard.repository.js
+│   │   │   │   ├── dashboard.routes.js
+│   │   │   │   ├── dashboard.service.js
+│   │   │   │   └── dashboard.validator.js
+│   │   │   └── observations
+│   │   │       ├── observation.controller.js
+│   │   │       ├── observation.repository.js
+│   │   │       ├── observation.routes.js
+│   │   │       ├── observation.service.js
+│   │   │       ├── observationUpload.js
+│   │   │       └── observation.validator.js
+│   │   ├── server.js
+│   │   └── shared
+│   │       ├── constants
+│   │       │   └── roles.js
+│   │       └── errors
+│   │           └── AppError.js
+│   └── uploads
+│       └── observations
+│           └── 6360a6d3-377c-49ad-b06c-a51972a67cf6.png
+├── compose.yaml
+├── folder_structure.txt
+└── frontend
+    ├── .env
+    ├── index.html
+    ├── package.json
+    ├── package-lock.json
+    ├── src
+    │   ├── app
+    │   │   ├── App.jsx
+    │   │   ├── authProvider.jsx
+    │   │   └── routes.jsx
+    │   ├── components
+    │   │   ├── Alert.jsx
+    │   │   ├── Button.jsx
+    │   │   └── LoadingSpinner.jsx
+    │   ├── constants
+    │   │   └── roles.js
+    │   ├── features
+    │   │   ├── auth
+    │   │   │   ├── auth.service.js
+    │   │   │   ├── HomePage.jsx
+    │   │   │   ├── LoginPage.jsx
+    │   │   │   ├── SignupPage.jsx
+    │   │   │   └── useAuth.js
+    │   │   ├── closures
+    │   │   │   ├── ActionPlanForm.jsx
+    │   │   │   ├── ApprovalPanel.jsx
+    │   │   │   ├── ClosurePage.jsx
+    │   │   │   ├── closure.service.js
+    │   │   │   └── useClosures.js
+    │   │   ├── dashboard
+    │   │   │   ├── AuditStatusCards.jsx
+    │   │   │   ├── DashboardPage.jsx
+    │   │   │   ├── dashboard.service.js
+    │   │   │   ├── useDashboard.js
+    │   │   │   └── WeeklySummary.jsx
+    │   │   ├── observations
+    │   │   │   ├── ObservationCard.jsx
+    │   │   │   ├── ObservationPage.jsx
+    │   │   │   ├── observation.service.js
+    │   │   │   ├── PhotographInput.jsx
+    │   │   │   ├── RiskSelector.jsx
+    │   │   │   └── useObservations.js
+    │   │   └── patrols
+    │   │       └── PatrolCalendar.jsx
+    │   ├── layouts
+    │   │   ├── AppLayout.jsx
+    │   │   ├── AuthLayout.jsx
+    │   │   └── Sidebar.jsx
+    │   ├── main.jsx
+    │   ├── services
+    │   │   └── apiClient.js
+    │   └── styles
+    │       └── global.css
+    └── vite.config.js
+
+33 directories, 85 files
