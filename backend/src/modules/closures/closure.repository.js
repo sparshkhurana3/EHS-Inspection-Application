@@ -88,6 +88,30 @@ function mapClosure(row) {
     responsibleHodName:
       row.responsible_hod_name,
 
+    /*
+     * Which registered user the plan is assigned to, and the ticket
+     * opened for them. Both nullable: a closure whose plan has never
+     * been saved has neither, and a closure saved before this feature
+     * shipped has a name but no id or ticket.
+     */
+    actionHodId:
+      row.action_hod_id ?? null,
+
+    actionHodName:
+      row.action_hod_name ?? null,
+
+    ticketId:
+      row.ticket_id ?? null,
+
+    ticketStatus:
+      row.ticket_status ?? null,
+
+    ticketDecision:
+      row.ticket_decision ?? null,
+
+    ticketClosureDate:
+      row.ticket_closure_date ?? null,
+
     completionDate:
       row.completion_date,
 
@@ -157,6 +181,8 @@ const CLOSURE_SELECT = `
     closure_request.action_plan,
     closure_request.target_date,
     closure_request.responsible_hod_name,
+    closure_request.action_hod_id,
+    action_hod.full_name AS action_hod_name,
     closure_request.completion_date,
     closure_request.action_plan_saved_at,
     closure_request.submitted_for_closure_at,
@@ -204,7 +230,12 @@ const CLOSURE_SELECT = `
       AS auditee_name,
 
     ehs_officer.full_name
-      AS ehs_officer_name
+      AS ehs_officer_name,
+
+    latest_ticket.id AS ticket_id,
+    latest_ticket.status AS ticket_status,
+    latest_ticket.decision AS ticket_decision,
+    latest_ticket.closure_date AS ticket_closure_date
 
   FROM closure_requests
     AS closure_request
@@ -241,8 +272,30 @@ const CLOSURE_SELECT = `
   LEFT JOIN users AS reviewer
     ON reviewer.id = closure_request.reviewed_by
 
+  LEFT JOIN users AS action_hod
+    ON action_hod.id = closure_request.action_hod_id
+
   LEFT JOIN zone_areas AS report_area
     ON report_area.id = observation_report.zone_area_id
+
+  /*
+   * The most recent ticket for this closure (there is at most one per
+   * approval round; a rejected-and-resubmitted plan opens a new round
+   * and a new ticket, and the latest one is what the closure views
+   * should show).
+   */
+  LEFT JOIN LATERAL (
+    SELECT
+      ticket.id,
+      ticket.status,
+      ticket.decision,
+      ticket.closure_date,
+      ticket.closure_round
+    FROM action_tickets AS ticket
+    WHERE ticket.closure_request_id = closure_request.id
+    ORDER BY ticket.closure_round DESC
+    LIMIT 1
+  ) AS latest_ticket ON TRUE
 `;
 
 /**
@@ -404,6 +457,7 @@ export async function findClosureByIdForUser(
         closure_request.id = $1
         AND (
           closure_request.requested_by = $2
+          OR closure_request.action_hod_id = $2
           OR patrol.auditor_id = $2
           OR patrol.auditee_id = $2
           OR patrol.ehs_officer_id = $2
@@ -450,6 +504,7 @@ export async function saveActionPlan(
     actionPlan,
     targetDate,
     responsibleHodName,
+    actionHodId,
   },
   client = databasePool,
 ) {
@@ -460,12 +515,13 @@ export async function saveActionPlan(
         action_plan = $1,
         target_date = $2::DATE,
         responsible_hod_name = $3,
+        action_hod_id = $4,
         status = 'IN_PROGRESS',
         action_plan_saved_at = NOW(),
         updated_at = NOW()
       WHERE
-        id = $4
-        AND requested_by = $5
+        id = $5
+        AND requested_by = $6
         AND status IN (
           'OPEN',
           'IN_PROGRESS',
@@ -479,7 +535,9 @@ export async function saveActionPlan(
         action_plan,
         target_date,
         responsible_hod_name,
+        action_hod_id,
         status,
+        approval_iteration,
         action_plan_saved_at,
         updated_at
     `,
@@ -487,8 +545,175 @@ export async function saveActionPlan(
       actionPlan,
       targetDate,
       responsibleHodName,
+      actionHodId,
       closureId,
       auditeeId,
+    ],
+  );
+
+  return result.rows[0] ?? null;
+}
+
+/**
+ * The plant this closure's patrol belongs to, independent of whether
+ * any Action Team HOD is registered there yet. Kept separate from
+ * findActionHodsForClosure below, whose inner join to hod_user would
+ * otherwise return zero rows (and no plant name) when the location has
+ * no HOD registered.
+ */
+export async function findPlantNameForClosure(
+  {
+    closureId,
+    auditeeId,
+  },
+  client = databasePool,
+) {
+  const result = await client.query(
+    `
+      SELECT target_plant.name AS plant_name
+
+      FROM closure_requests AS closure_request
+
+      JOIN patrols AS patrol
+        ON patrol.id = closure_request.patrol_id
+
+      JOIN units AS patrol_unit
+        ON patrol_unit.id = patrol.unit_id
+
+      JOIN plants AS target_plant
+        ON target_plant.id = patrol_unit.plant_id
+
+      WHERE
+        closure_request.id = $1
+        AND closure_request.requested_by = $2
+
+      LIMIT 1
+    `,
+    [closureId, auditeeId],
+  );
+
+  return result.rows[0]?.plant_name ?? null;
+}
+
+/**
+ * Active ACTION_HOD users at the same plant as this closure's patrol,
+ * for the auditee's assignment dropdown. Scoped to a closure this
+ * auditee owns, the same location rule as the auditor/auditee dropdowns
+ * on the Plan page.
+ */
+export async function findActionHodsForClosure(
+  {
+    closureId,
+    auditeeId,
+  },
+  client = databasePool,
+) {
+  const result = await client.query(
+    `
+      SELECT
+        hod_user.id,
+        hod_user.full_name,
+        hod_user.username,
+        hod_user.email,
+        target_plant.name AS plant_name
+
+      FROM closure_requests AS closure_request
+
+      JOIN patrols AS patrol
+        ON patrol.id = closure_request.patrol_id
+
+      JOIN units AS patrol_unit
+        ON patrol_unit.id = patrol.unit_id
+
+      JOIN plants AS target_plant
+        ON target_plant.id = patrol_unit.plant_id
+
+      JOIN users AS hod_user
+        ON hod_user.plant_id = patrol_unit.plant_id
+        AND hod_user.is_active = TRUE
+
+      JOIN user_roles AS hod_role_link
+        ON hod_role_link.user_id = hod_user.id
+
+      JOIN roles AS hod_role
+        ON hod_role.id = hod_role_link.role_id
+        AND hod_role.code = 'ACTION_HOD'
+
+      WHERE
+        closure_request.id = $1
+        AND closure_request.requested_by = $2
+
+      ORDER BY
+        hod_user.full_name,
+        hod_user.username
+    `,
+    [closureId, auditeeId],
+  );
+
+  return result.rows.map((row) => ({
+    id: row.id,
+    fullName: row.full_name,
+    username: row.username,
+    email: row.email,
+    plantName: row.plant_name,
+  }));
+}
+
+/**
+ * Open (or refresh) the ticket for this closure's current approval
+ * round. The WHERE on the DO UPDATE means a ticket the HOD has already
+ * acted on (status no longer OPEN) is left untouched by a later save;
+ * the statement then returns no row, which is not an error.
+ */
+export async function upsertTicketForClosureRound(
+  {
+    closureId,
+    observationReportId,
+    patrolId,
+    closureRound,
+    actionHodId,
+    actionHodName,
+    proposedActionPlan,
+    targetDate,
+    assignedBy,
+  },
+  client = databasePool,
+) {
+  const result = await client.query(
+    `
+      INSERT INTO action_tickets (
+        closure_request_id,
+        observation_report_id,
+        patrol_id,
+        closure_round,
+        action_hod_id,
+        assigned_by,
+        action_hod_name,
+        proposed_action_plan,
+        target_date
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      ON CONFLICT (closure_request_id, closure_round) DO UPDATE
+      SET
+        action_hod_id = EXCLUDED.action_hod_id,
+        action_hod_name = EXCLUDED.action_hod_name,
+        proposed_action_plan = EXCLUDED.proposed_action_plan,
+        target_date = EXCLUDED.target_date,
+        assigned_at = NOW(),
+        updated_at = NOW()
+      WHERE action_tickets.status = 'OPEN'
+      RETURNING id, status
+    `,
+    [
+      closureId,
+      observationReportId,
+      patrolId,
+      closureRound,
+      actionHodId,
+      assignedBy,
+      actionHodName,
+      proposedActionPlan,
+      targetDate,
     ],
   );
 

@@ -4,6 +4,13 @@ export const USER_ROLES = Object.freeze({
   HOD: "HOD",
   PLANT_HEAD: "PLANT_HEAD",
   ADMIN: "ADMIN",
+  /*
+   * Action Team HOD: reviews and implements action plan tickets raised
+   * by an auditee (maintenance, electrical, utility, etc). Distinct
+   * from HOD above, which is a management role with a plant-wide
+   * dashboard. An Action Team HOD account holds only this role.
+   */
+  ACTION_HOD: "ACTION_HOD",
 });
 
 export const DEFAULT_SIGNUP_ROLE =
@@ -29,6 +36,15 @@ export const MANAGEMENT_ROLES = Object.freeze([
 export const PLANNING_ROLES = Object.freeze([
   USER_ROLES.EHS_OFFICER,
   USER_ROLES.ADMIN,
+]);
+
+/*
+ * Roles that work action tickets. Deliberately not part of
+ * MANAGEMENT_ROLES or PLANNING_ROLES: an Action Team HOD does not plan
+ * audits or see the management dashboard, only their own tickets.
+ */
+export const TICKET_ROLES = Object.freeze([
+  USER_ROLES.ACTION_HOD,
 ]);
 
 export function normalizeRole(role) {

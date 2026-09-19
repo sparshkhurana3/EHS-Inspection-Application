@@ -112,9 +112,29 @@ export async function saveActionPlan(
           targetDate:
             req.body.targetDate,
 
-          responsibleHodName:
-            req.body
-              .responsibleHodName,
+          actionHodId:
+            req.body.actionHodId,
+        });
+
+    res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getActionHodOptions(
+  req,
+  res,
+  next,
+) {
+  try {
+    const result =
+      await closureService
+        .getActionHodOptions({
+          userId: req.user.id,
+
+          closureId:
+            req.params.closureId,
         });
 
     res.status(200).json(result);

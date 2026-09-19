@@ -16,6 +16,7 @@ Reference documentation for humans and for Claude Code sessions. `CLAUDE.md` at 
 | 10 | [Observations page plan](10-observations-page-plan.md) | Implementing the weekly pending list and the submitted-report detail view |
 | 11 | [Closure page plan](11-closure-page-plan.md) | Implementing the pending list, the EHS approval loop, and the completed detail view |
 | 12 | [Plan page plan](12-plan-page-plan.md) | Implementing role-gated, location-scoped audit scheduling for the EHS Officer |
+| 13 | [Action ticket plan](13-action-ticket-plan.md) | Implementing the `ACTION_HOD` role, the auditee → Action HOD assignment, and the ticket page with evidence uploads |
 | 10 | [Schema migration plan](10-schema-migration-plan.md) | Implementing the `users` / `zone_audits` / `observations` schema and reworking backend + frontend wiring to match |
 
 ## Maintaining these docs

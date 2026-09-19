@@ -325,6 +325,7 @@ export async function findSchedulingConflict(
     scheduledDate,
     auditorId,
     auditeeId,
+    excludePatrolId = null,
   },
   client = databasePool,
 ) {
@@ -349,10 +350,52 @@ export async function findSchedulingConflict(
           patrol.auditor_id IN ($2, $3)
           OR patrol.auditee_id IN ($2, $3)
         )
+        AND (
+          $4::BIGINT IS NULL
+          OR patrol.id <> $4
+        )
 
       LIMIT 1
     `,
-    [scheduledDate, auditorId, auditeeId],
+    [
+      scheduledDate,
+      auditorId,
+      auditeeId,
+      excludePatrolId,
+    ],
+  );
+
+  return result.rows[0] ?? null;
+}
+
+/**
+ * Reassigns who audits and who is audited. Restricted to a patrol still
+ * SCHEDULED, since once an observation report exists it references the
+ * auditor who filed it and a closure references the auditee it was
+ * opened for; reassigning after that point would leave those records
+ * pointing at the wrong person.
+ */
+export async function updatePatrolAssignment(
+  {
+    patrolId,
+    auditorId,
+    auditeeId,
+  },
+  client = databasePool,
+) {
+  const result = await client.query(
+    `
+      UPDATE patrols
+      SET
+        auditor_id = $1,
+        auditee_id = $2,
+        updated_at = NOW()
+      WHERE
+        id = $3
+        AND status = 'SCHEDULED'
+      RETURNING id
+    `,
+    [auditorId, auditeeId, patrolId],
   );
 
   return result.rows[0] ?? null;

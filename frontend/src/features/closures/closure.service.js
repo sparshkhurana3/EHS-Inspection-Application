@@ -22,11 +22,20 @@ export function fetchPendingApprovals() {
   );
 }
 
+export function fetchActionHodOptions(closureId) {
+  return apiRequest(
+    `/closures/${encodeURIComponent(
+      closureId,
+    )}/action-hods`,
+    { method: "GET" },
+  );
+}
+
 export function saveClosureActionPlan({
   closureId,
   actionPlan,
   targetDate,
-  responsibleHodName,
+  actionHodId,
 }) {
   return apiRequest(
     `/closures/${encodeURIComponent(
@@ -37,7 +46,7 @@ export function saveClosureActionPlan({
       body: JSON.stringify({
         actionPlan,
         targetDate,
-        responsibleHodName,
+        actionHodId,
       }),
     },
   );

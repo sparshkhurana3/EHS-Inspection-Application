@@ -38,6 +38,15 @@ async function startServer() {
       { recursive: true },
     );
 
+    fs.mkdirSync(
+      path.resolve(
+        process.cwd(),
+        "uploads",
+        "tickets",
+      ),
+      { recursive: true },
+    );
+
     const databaseStatus =
       await verifyDatabaseConnection();
 

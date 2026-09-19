@@ -36,12 +36,6 @@ export default function AppLayout() {
     );
   }
 
-  const displayedRole =
-    Array.isArray(user?.roles) &&
-    user.roles.length > 0
-      ? user.roles.join(", ")
-      : user?.role ?? "USER";
-
   const displayedName =
     user?.fullName ??
     user?.name ??
@@ -63,11 +57,6 @@ export default function AppLayout() {
           </div>
 
           <div className="app-topbar-user">
-            <div>
-              <span>Application role</span>
-              <strong>{displayedRole}</strong>
-            </div>
-
             <button
               type="button"
               className="app-logout-button"

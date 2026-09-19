@@ -40,6 +40,14 @@ function createPublicUser(user) {
 }
 
 function determineRedirectPath(roles) {
+  /*
+   * Checked first: an Action Team HOD's only page is Ticket, and this
+   * role never overlaps with EHS_OFFICER/ADMIN.
+   */
+  if (roles.includes(USER_ROLES.ACTION_HOD)) {
+    return "/tickets";
+  }
+
   if (
     roles.includes(USER_ROLES.EHS_OFFICER) ||
     roles.includes(USER_ROLES.ADMIN)

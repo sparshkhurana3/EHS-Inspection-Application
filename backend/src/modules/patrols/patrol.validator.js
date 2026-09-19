@@ -1,5 +1,6 @@
 import {
   body,
+  param,
 } from "express-validator";
 
 /*
@@ -46,6 +47,55 @@ export const createPatrolValidationRules = [
 
       return true;
     }),
+
+  body("auditorId")
+    .exists({
+      checkNull: true,
+      checkFalsy: true,
+    })
+    .withMessage("Auditor is required.")
+    .bail()
+    .isInt({ min: 1 })
+    .withMessage(
+      "Auditor must be a positive integer.",
+    )
+    .toInt(),
+
+  body("auditeeId")
+    .exists({
+      checkNull: true,
+      checkFalsy: true,
+    })
+    .withMessage("Auditee is required.")
+    .bail()
+    .isInt({ min: 1 })
+    .withMessage(
+      "Auditee must be a positive integer.",
+    )
+    .toInt(),
+
+  body()
+    .custom((value) => {
+      if (
+        Number(value?.auditorId) ===
+        Number(value?.auditeeId)
+      ) {
+        throw new Error(
+          "The auditor and auditee must be different users.",
+        );
+      }
+
+      return true;
+    }),
+];
+
+export const updatePatrolAssignmentValidationRules = [
+  param("patrolId")
+    .isInt({ min: 1 })
+    .withMessage(
+      "Patrol ID must be a positive integer.",
+    )
+    .toInt(),
 
   body("auditorId")
     .exists({

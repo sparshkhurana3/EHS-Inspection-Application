@@ -21,6 +21,21 @@ function normalizeDateOnly(value) {
   return String(value ?? "").slice(0, 10);
 }
 
+/**
+ * A DATE column comes back from `pg` as a JS Date, not a string, so
+ * String(value).slice(0, 10) (normalizeDateOnly, above) would slice the
+ * long-form Date#toString() output instead of an ISO date. Used only
+ * for values read back from the database; a user-submitted date is
+ * already a "YYYY-MM-DD" string and goes through normalizeDateOnly.
+ */
+function toDateOnlyString(value) {
+  if (value instanceof Date) {
+    return value.toISOString().slice(0, 10);
+  }
+
+  return normalizeDateOnly(value);
+}
+
 function toPositiveInteger(value) {
   const parsed = Number.parseInt(value, 10);
 
@@ -331,5 +346,193 @@ export async function schedulePatrol(input) {
   return {
     message: "Audit scheduled successfully.",
     patrol,
+  };
+}
+
+function validateAssignmentInput({
+  auditorId,
+  auditeeId,
+}) {
+  const normalizedAuditorId =
+    toPositiveInteger(auditorId);
+
+  if (!normalizedAuditorId) {
+    throw new AppError(
+      "Select the auditor for this audit.",
+      400,
+      "INVALID_AUDITOR_ID",
+    );
+  }
+
+  const normalizedAuditeeId =
+    toPositiveInteger(auditeeId);
+
+  if (!normalizedAuditeeId) {
+    throw new AppError(
+      "Select the auditee for this audit.",
+      400,
+      "INVALID_AUDITEE_ID",
+    );
+  }
+
+  if (
+    normalizedAuditorId ===
+    normalizedAuditeeId
+  ) {
+    throw new AppError(
+      "The auditor and auditee must be different users.",
+      400,
+      "AUDITOR_AUDITEE_MUST_DIFFER",
+    );
+  }
+
+  return {
+    auditorId: normalizedAuditorId,
+    auditeeId: normalizedAuditeeId,
+  };
+}
+
+/**
+ * Reassigns the auditor and/or auditee on a patrol the officer scheduled.
+ * Only reachable while the patrol is still SCHEDULED: no observation
+ * report has been filed and no closure opened, so nothing yet refers to
+ * the people being replaced.
+ */
+export async function updatePatrolAssignment(
+  input,
+) {
+  const {
+    auditorId,
+    auditeeId,
+  } = validateAssignmentInput(input);
+
+  const patrolId = toPositiveInteger(
+    input.patrolId,
+  );
+
+  if (!patrolId) {
+    throw new AppError(
+      "The audit was not found.",
+      404,
+      "PATROL_NOT_FOUND",
+    );
+  }
+
+  await withTransaction(async (client) => {
+    const location =
+      await requireOfficerLocation(
+        input.userId,
+        client,
+      );
+
+    const existingPatrol =
+      await patrolRepository.findPatrolById(
+        patrolId,
+        client,
+      );
+
+    if (!existingPatrol) {
+      throw new AppError(
+        "The audit was not found.",
+        404,
+        "PATROL_NOT_FOUND",
+      );
+    }
+
+    if (existingPatrol.plantId !== location.id) {
+      throw new AppError(
+        "This audit is outside the location you are responsible for.",
+        403,
+        "ZONE_OUTSIDE_OFFICER_DOMAIN",
+      );
+    }
+
+    const auditor =
+      await patrolRepository
+        .findActiveUserAtLocation(
+          {
+            userId: auditorId,
+            plantId: location.id,
+          },
+          client,
+        );
+
+    if (!auditor) {
+      throw new AppError(
+        "The selected auditor is not an active user at this location.",
+        400,
+        "INVALID_AUDITOR",
+      );
+    }
+
+    const auditee =
+      await patrolRepository
+        .findActiveUserAtLocation(
+          {
+            userId: auditeeId,
+            plantId: location.id,
+          },
+          client,
+        );
+
+    if (!auditee) {
+      throw new AppError(
+        "The selected auditee is not an active user at this location.",
+        400,
+        "INVALID_AUDITEE",
+      );
+    }
+
+    const conflict =
+      await patrolRepository
+        .findSchedulingConflict(
+          {
+            scheduledDate:
+              toDateOnlyString(
+                existingPatrol.scheduledDate,
+              ),
+            auditorId,
+            auditeeId,
+            excludePatrolId: patrolId,
+          },
+          client,
+        );
+
+    if (conflict) {
+      throw new AppError(
+        conflict.conflict_type === "AUDITOR"
+          ? "The selected auditor already has an audit scheduled on this date."
+          : "The selected auditee already has an audit scheduled on this date.",
+        409,
+        conflict.conflict_type === "AUDITOR"
+          ? "AUDITOR_SCHEDULING_CONFLICT"
+          : "AUDITEE_SCHEDULING_CONFLICT",
+      );
+    }
+
+    const updated =
+      await patrolRepository
+        .updatePatrolAssignment(
+          { patrolId, auditorId, auditeeId },
+          client,
+        );
+
+    if (!updated) {
+      throw new AppError(
+        "The auditor and auditee can only be changed before an observation report has been filed for this audit.",
+        409,
+        "PATROL_NOT_EDITABLE",
+      );
+    }
+  });
+
+  return {
+    message:
+      "Audit assignment updated successfully.",
+
+    patrol:
+      await patrolRepository.findPatrolById(
+        patrolId,
+      ),
   };
 }

@@ -254,6 +254,121 @@ function createManagementWeek(
   };
 }
 
+/*
+ * The single label an EHS Officer sees on a zone card, collapsing the
+ * observation report and closure/ticket machinery into the five states
+ * they were asked for. Driven by closureStatus rather than
+ * patrol.status: PATROL.status only ever reaches SCHEDULED,
+ * PENDING_AUDITEE_ACTION, REEXAMINATION_REQUIRED or COMPLETED in
+ * practice, while closure_requests.status is the one that actually
+ * distinguishes every step of the auditee/Action HOD loop.
+ */
+const ZONE_STATUS_LABELS = {
+  OPEN: "Open",
+  WITH_AUDITEE: "With Auditee",
+  ACTION_PLAN_IN_PROGRESS:
+    "Action Plan being Implemented",
+  EHS_OFFICER_ACTION_REQUIRED:
+    "EHS Officer Action Required",
+  CLOSED: "Closed",
+};
+
+function getZoneStatusCode({
+  observationReportId,
+  closureStatus,
+}) {
+  if (!observationReportId) {
+    return "OPEN";
+  }
+
+  const normalizedClosureStatus = String(
+    closureStatus ?? "",
+  ).toUpperCase();
+
+  if (
+    normalizedClosureStatus ===
+      "SUBMITTED_FOR_CLOSURE"
+  ) {
+    return "EHS_OFFICER_ACTION_REQUIRED";
+  }
+
+  if (normalizedClosureStatus === "APPROVED") {
+    return "CLOSED";
+  }
+
+  if (normalizedClosureStatus === "IN_PROGRESS") {
+    return "ACTION_PLAN_IN_PROGRESS";
+  }
+
+  /*
+   * OPEN (plan not yet saved), REEXAMINATION_REQUIRED (sent back, plan
+   * needs to be redone) and REJECTED all put the ball back with the
+   * auditee.
+   */
+  return "WITH_AUDITEE";
+}
+
+/**
+ * Groups the flat unit/zone rows from findOfficerUnitWeeklyPlans into
+ * one card per unit. A unit with nothing scheduled keeps its card
+ * (zones: []), so the officer always sees one card per unit they
+ * manage, exactly as many as they manage.
+ */
+function buildOfficerUnitWeeklyPlans(rows) {
+  const unitsById = new Map();
+
+  for (const row of rows) {
+    if (!unitsById.has(row.unitId)) {
+      unitsById.set(row.unitId, {
+        unitId: row.unitId,
+        unitName: row.unitName,
+        unitNumber: row.unitNumber,
+        weekStart: row.weekStart,
+        weekEnd: row.weekEnd,
+        zones: [],
+      });
+    }
+
+    if (!row.patrolId) {
+      continue;
+    }
+
+    const statusCode = getZoneStatusCode({
+      observationReportId:
+        row.observationReportId,
+      closureStatus: row.closureStatus,
+    });
+
+    unitsById.get(row.unitId).zones.push({
+      patrolId: row.patrolId,
+      zoneId: row.zoneId,
+      zoneName: row.zoneName,
+      zoneNumber: row.zoneNumber,
+      scheduledDate: row.scheduledDate,
+      auditorId: row.auditorId,
+      auditorName: row.auditorName,
+      auditeeId: row.auditeeId,
+      auditeeName: row.auditeeName,
+      observationReportId:
+        row.observationReportId,
+      closureId: row.closureId,
+
+      status: statusCode,
+      displayStatus:
+        ZONE_STATUS_LABELS[statusCode],
+
+      /*
+       * Reassigning the auditor/auditee only makes sense before any
+       * work has happened against this audit.
+       */
+      canEditAssignment:
+        !row.observationReportId,
+    });
+  }
+
+  return [...unitsById.values()];
+}
+
 function parseDashboardPeriod(
   yearValue,
   monthValue,
@@ -366,6 +481,34 @@ export async function getDashboardData({
         }),
     ]);
 
+    /*
+     * Unit-wise cards are an EHS Officer feature: every location has
+     * its own officer, so scoping by their plant is what makes "one
+     * card per unit they manage" meaningful. HOD/Plant Head/Admin keep
+     * the existing plant-wide nextWeek list below.
+     */
+    let unitWeeks = null;
+
+    if (dashboardRole === USER_ROLES.EHS_OFFICER) {
+      const officerPlant =
+        await dashboardRepository
+          .findOfficerPlant(user.id);
+
+      if (officerPlant) {
+        const unitWeekRows =
+          await dashboardRepository
+            .findOfficerUnitWeeklyPlans({
+              plantId: officerPlant.id,
+              weekStart,
+            });
+
+        unitWeeks =
+          buildOfficerUnitWeeklyPlans(
+            unitWeekRows,
+          );
+      }
+    }
+
     return {
       role: dashboardRole,
 
@@ -387,6 +530,8 @@ export async function getDashboardData({
         weekStart,
         weekEnd,
       ),
+
+      unitWeeks,
     };
   }
 

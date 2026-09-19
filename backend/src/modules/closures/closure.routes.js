@@ -20,6 +20,7 @@ import {
 
 import {
   approveClosure,
+  getActionHodOptions,
   getAuditeeClosures,
   getClosureById,
   getPendingApprovals,
@@ -65,6 +66,19 @@ router.get(
   closureIdValidationRules,
   validate,
   getClosureById,
+);
+
+/*
+ * The auditee's Action Team HOD dropdown for this closure. Registered
+ * before the PATCH below only for readability; the methods differ so
+ * there is no route-order ambiguity between them.
+ */
+router.get(
+  "/:closureId/action-hods",
+  authenticate,
+  closureIdValidationRules,
+  validate,
+  getActionHodOptions,
 );
 
 router.patch(

@@ -408,6 +408,14 @@ export async function findPhotographByReportId(
           patrol.auditor_id = $2
           OR patrol.auditee_id = $2
           OR patrol.ehs_officer_id = $2
+          OR EXISTS (
+            SELECT 1
+            FROM action_tickets AS ticket
+            WHERE
+              ticket.observation_report_id =
+                observation_report.id
+              AND ticket.action_hod_id = $2
+          )
         )
 
       LIMIT 1

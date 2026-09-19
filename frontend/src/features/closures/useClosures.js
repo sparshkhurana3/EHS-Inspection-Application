@@ -7,6 +7,7 @@ import {
 
 import {
   approveClosureReport,
+  fetchActionHodOptions,
   fetchAuditeeClosures,
   fetchClosureById,
   fetchPendingApprovals,
@@ -175,6 +176,62 @@ export function useClosureDetail(closureId) {
 }
 
 /**
+ * The Action Team HOD options for this closure's assignment dropdown,
+ * scoped to the closure's own plant. Loaded once per closure.
+ */
+export function useActionHodOptions(closureId) {
+  const [options, setOptions] = useState([]);
+  const [plantName, setPlantName] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!closureId) {
+      return;
+    }
+
+    let cancelled = false;
+
+    setLoading(true);
+    setError("");
+
+    fetchActionHodOptions(closureId)
+      .then((result) => {
+        if (cancelled) {
+          return;
+        }
+
+        setOptions(result?.actionHods ?? []);
+        setPlantName(result?.plantName ?? null);
+      })
+      .catch((requestError) => {
+        if (cancelled) {
+          return;
+        }
+
+        setError(getErrorMessage(requestError));
+        setOptions([]);
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [closureId]);
+
+  return {
+    options,
+    plantName,
+    loading,
+    error,
+  };
+}
+
+/**
  * Action plan state for one closure.
  *
  * After a rejection the server returns a null action plan with the
@@ -185,7 +242,7 @@ export function useClosureForm(closure) {
   const [values, setValues] = useState({
     actionPlan: "",
     targetDate: "",
-    responsibleHodName: "",
+    actionHodId: "",
   });
 
   const [saving, setSaving] = useState(false);
@@ -199,8 +256,9 @@ export function useClosureForm(closure) {
       targetDate: toDateInputValue(
         closure?.targetDate,
       ),
-      responsibleHodName:
-        closure?.responsibleHodName ?? "",
+      actionHodId: closure?.actionHodId
+        ? String(closure.actionHodId)
+        : "",
     });
 
     setError("");
@@ -208,7 +266,7 @@ export function useClosureForm(closure) {
     closure?.id,
     closure?.actionPlan,
     closure?.targetDate,
-    closure?.responsibleHodName,
+    closure?.actionHodId,
   ]);
 
   const updateField = useCallback(
@@ -248,10 +306,10 @@ export function useClosureForm(closure) {
     if (
       !values.actionPlan.trim() ||
       !values.targetDate ||
-      !values.responsibleHodName.trim()
+      !values.actionHodId
     ) {
       setError(
-        "Complete the action plan, target date, and responsible HOD name.",
+        "Complete the action plan, target date, and Action Team HOD.",
       );
 
       return null;
@@ -265,8 +323,7 @@ export function useClosureForm(closure) {
         closureId: closure.id,
         actionPlan: values.actionPlan,
         targetDate: values.targetDate,
-        responsibleHodName:
-          values.responsibleHodName,
+        actionHodId: values.actionHodId,
       });
     } catch (requestError) {
       setError(getErrorMessage(requestError));

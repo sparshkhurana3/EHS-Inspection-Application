@@ -6,9 +6,14 @@ import LoadingSpinner from "../../components/LoadingSpinner.jsx";
 import ApprovalPanel from "./ApprovalPanel.jsx";
 import ObservationSummary from "./ObservationSummary.jsx";
 
+import TicketStatusCard from "../tickets/TicketStatusCard.jsx";
+
 import { formatDate } from "../../lib/errorMessage.js";
 
-import { useApprovalQueue } from "./useClosures.js";
+import {
+  useApprovalQueue,
+  useClosureDetail,
+} from "./useClosures.js";
 
 /**
  * The EHS Officer's review queue: everything submitted and waiting.
@@ -32,6 +37,14 @@ export default function ApprovalQueuePage() {
         String(closure.id) ===
         String(selectedId),
     ) ?? null;
+
+  /*
+   * The queue list response has no ticket data; fetching the full
+   * closure for whichever row is selected is what carries the embedded
+   * ticket (with evidence) into this page.
+   */
+  const { closure: selectedDetail } =
+    useClosureDetail(selectedId);
 
   if (loading) {
     return (
@@ -137,6 +150,10 @@ export default function ApprovalQueuePage() {
               await reject(id, comments);
               setSelectedId(null);
             }}
+          />
+
+          <TicketStatusCard
+            ticket={selectedDetail?.ticket}
           />
         </>
       ) : null}

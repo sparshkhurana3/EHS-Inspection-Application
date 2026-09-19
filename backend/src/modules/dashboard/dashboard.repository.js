@@ -557,4 +557,198 @@ export async function getUserAnnualMetrics(
     actualClosures:
       result.rows[0]
         ?.actual_closures ?? 0,
-  }}
+  };
+}
+
+/**
+ * The plant the EHS Officer is responsible for, or null when unset.
+ * Mirrors patrols/patrol.repository.js's findUserLocation; kept as its
+ * own copy here rather than a cross-module import, matching the rest
+ * of this module's self-contained repository functions.
+ */
+export async function findOfficerPlant(
+  userId,
+  client = databasePool,
+) {
+  const result = await client.query(
+    `
+      SELECT
+        plant_record.id,
+        plant_record.name,
+        plant_record.code
+
+      FROM users AS app_user
+
+      JOIN plants AS plant_record
+        ON plant_record.id = app_user.plant_id
+
+      WHERE
+        app_user.id = $1
+        AND app_user.is_active = TRUE
+        AND plant_record.is_active = TRUE
+    `,
+    [userId],
+  );
+
+  const row = result.rows[0];
+
+  if (!row) {
+    return null;
+  }
+
+  return {
+    id: row.id,
+    name: row.name,
+    code: row.code,
+  };
+}
+
+/**
+ * One row per zone-patrol, for every unit at this plant, scoped each
+ * unit to its own next scheduled week rather than one week shared by
+ * the whole plant. A unit with nothing scheduled on or after
+ * `weekStart` still appears (unit_id/unit_name set, every patrol
+ * column null), so the officer sees a card per unit they manage even
+ * when a unit currently has nothing planned.
+ */
+export async function findOfficerUnitWeeklyPlans(
+  {
+    plantId,
+    weekStart,
+  },
+  client = databasePool,
+) {
+  const result = await client.query(
+    `
+      WITH officer_units AS (
+        SELECT
+          unit_record.id,
+          unit_record.name,
+          unit_record.unit_number
+        FROM units AS unit_record
+        WHERE
+          unit_record.plant_id = $1
+          AND unit_record.is_active = TRUE
+      ),
+
+      next_dates AS (
+        SELECT
+          officer_units.id AS unit_id,
+          MIN(p.scheduled_date) AS next_date
+        FROM officer_units
+        LEFT JOIN patrols p
+          ON p.unit_id = officer_units.id
+          AND p.status <> 'CANCELLED'
+          AND p.scheduled_date >= $2::DATE
+        GROUP BY officer_units.id
+      ),
+
+      unit_weeks AS (
+        SELECT
+          unit_id,
+          DATE_TRUNC('week', next_date)::DATE
+            AS week_start,
+          (
+            DATE_TRUNC('week', next_date)
+            + INTERVAL '6 day'
+          )::DATE AS week_end
+        FROM next_dates
+        WHERE next_date IS NOT NULL
+      )
+
+      SELECT
+        officer_units.id AS unit_id,
+        officer_units.name AS unit_name,
+        officer_units.unit_number,
+
+        unit_weeks.week_start,
+        unit_weeks.week_end,
+
+        p.id AS patrol_id,
+        p.scheduled_date,
+        p.status AS patrol_status,
+
+        z.id AS zone_id,
+        z.name AS zone_name,
+        z.zone_number,
+
+        p.auditor_id,
+        auditor.full_name AS auditor_name,
+
+        p.auditee_id,
+        auditee.full_name AS auditee_name,
+
+        observation_report.id
+          AS observation_report_id,
+
+        closure_request.id AS closure_id,
+        closure_request.status AS closure_status
+
+      FROM officer_units
+
+      LEFT JOIN unit_weeks
+        ON unit_weeks.unit_id = officer_units.id
+
+      LEFT JOIN patrols p
+        ON p.unit_id = officer_units.id
+        AND p.status <> 'CANCELLED'
+        AND unit_weeks.week_start IS NOT NULL
+        AND p.scheduled_date >=
+            unit_weeks.week_start
+        AND p.scheduled_date <=
+            unit_weeks.week_end
+
+      LEFT JOIN zones z
+        ON z.id = p.zone_id
+
+      LEFT JOIN users auditor
+        ON auditor.id = p.auditor_id
+
+      LEFT JOIN users auditee
+        ON auditee.id = p.auditee_id
+
+      LEFT JOIN observation_reports
+        AS observation_report
+        ON observation_report.patrol_id = p.id
+
+      LEFT JOIN closure_requests
+        AS closure_request
+        ON closure_request.patrol_id = p.id
+
+      ORDER BY
+        officer_units.name ASC,
+        z.name ASC,
+        p.scheduled_date ASC
+    `,
+    [plantId, weekStart],
+  );
+
+  return result.rows.map((row) => ({
+    unitId: row.unit_id,
+    unitName: row.unit_name,
+    unitNumber: row.unit_number,
+
+    weekStart: row.week_start,
+    weekEnd: row.week_end,
+
+    patrolId: row.patrol_id,
+    scheduledDate: row.scheduled_date,
+    patrolStatus: row.patrol_status,
+
+    zoneId: row.zone_id,
+    zoneName: row.zone_name,
+    zoneNumber: row.zone_number,
+
+    auditorId: row.auditor_id,
+    auditorName: row.auditor_name,
+
+    auditeeId: row.auditee_id,
+    auditeeName: row.auditee_name,
+
+    observationReportId:
+      row.observation_report_id,
+
+    closureId: row.closure_id,
+    closureStatus: row.closure_status,
+  }));
+}

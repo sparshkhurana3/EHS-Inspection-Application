@@ -25,3 +25,22 @@ export function schedulePatrol({
     }),
   });
 }
+
+export function updatePatrolAssignment({
+  patrolId,
+  auditorId,
+  auditeeId,
+}) {
+  return apiRequest(
+    `/patrols/${encodeURIComponent(
+      patrolId,
+    )}/assignment`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        auditorId: Number(auditorId),
+        auditeeId: Number(auditeeId),
+      }),
+    },
+  );
+}

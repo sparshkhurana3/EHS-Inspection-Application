@@ -4,6 +4,11 @@ export const APP_ROLES = Object.freeze({
   HOD: "HOD",
   PLANT_HEAD: "PLANT_HEAD",
   ADMIN: "ADMIN",
+  /*
+   * Action Team HOD: works ticket decisions only. Distinct from HOD
+   * above, which is a management role with a plant-wide dashboard.
+   */
+  ACTION_HOD: "ACTION_HOD",
 });
 
 export const MANAGEMENT_ROLES = Object.freeze([
@@ -20,6 +25,13 @@ export const MANAGEMENT_ROLES = Object.freeze([
 export const PLANNING_ROLES = Object.freeze([
   APP_ROLES.EHS_OFFICER,
   APP_ROLES.ADMIN,
+]);
+
+/*
+ * Who works action tickets. Mirrors TICKET_ROLES on the backend.
+ */
+export const TICKET_ROLES = Object.freeze([
+  APP_ROLES.ACTION_HOD,
 ]);
 
 export function normalizeRole(role) {
@@ -81,4 +93,8 @@ export function hasManagementRole(user) {
 
 export function canPlanAudits(user) {
   return hasAnyRole(user, PLANNING_ROLES);
+}
+
+export function isActionHod(user) {
+  return hasAnyRole(user, TICKET_ROLES);
 }

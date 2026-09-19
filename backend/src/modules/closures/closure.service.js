@@ -8,6 +8,9 @@ import AppError
 import * as closureRepository
   from "./closure.repository.js";
 
+import * as ticketService
+  from "../tickets/ticket.service.js";
+
 const MAX_ACTION_PLAN_WORDS = 255;
 
 const EDITABLE_CLOSURE_STATUSES =
@@ -89,6 +92,17 @@ function getDisplayStatus(status) {
   return "Open";
 }
 
+/*
+ * Mirrors the label map in tickets/ticket.service.js. Kept local rather
+ * than imported so this module does not depend on ticket internals for
+ * a three-entry lookup.
+ */
+const TICKET_STATUS_LABELS = {
+  OPEN: "Open",
+  IN_PROGRESS: "In Progress",
+  CLOSED: "Closed",
+};
+
 function createClosureResponse(closure) {
   if (!closure) {
     return null;
@@ -138,6 +152,13 @@ function createClosureResponse(closure) {
     wasReturned:
       normalizedStatus ===
       "REEXAMINATION_REQUIRED",
+
+    ticketDisplayStatus:
+      closure.ticketStatus
+        ? (TICKET_STATUS_LABELS[
+            closure.ticketStatus
+          ] ?? closure.ticketStatus)
+        : null,
   };
 }
 
@@ -305,8 +326,33 @@ export async function getClosureById({
     );
   }
 
+  /*
+   * Embed the full ticket (with evidence) so the auditee and the EHS
+   * Officer see the Action Team HOD's decision without a second round
+   * trip. The read predicates line up: whoever can see this closure can
+   * see the ticket that belongs to it.
+   */
+  let ticket = null;
+
+  if (closure.ticketId) {
+    try {
+      const ticketResult =
+        await ticketService.getTicketById({
+          userId,
+          ticketId: closure.ticketId,
+        });
+
+      ticket = ticketResult.ticket;
+    } catch {
+      ticket = null;
+    }
+  }
+
   return {
-    closure: createClosureResponse(closure),
+    closure: {
+      ...createClosureResponse(closure),
+      ticket,
+    },
   };
 }
 
@@ -463,12 +509,58 @@ export async function rejectClosure(input) {
   });
 }
 
+/**
+ * The Action Team HOD options for the auditee's assignment dropdown:
+ * active ACTION_HOD users at this closure's own plant. An empty array
+ * is a normal 200; the frontend explains it rather than treating it as
+ * an error.
+ */
+export async function getActionHodOptions({
+  userId,
+  closureId,
+}) {
+  const existingClosure =
+    await closureRepository
+      .findClosureByIdForAuditee({
+        closureId,
+        auditeeId: userId,
+      });
+
+  if (!existingClosure) {
+    throw new AppError(
+      "The closure assignment was not found or is not assigned to the authenticated auditee.",
+      404,
+      "CLOSURE_ASSIGNMENT_NOT_FOUND",
+    );
+  }
+
+  const [actionHods, plantName] =
+    await Promise.all([
+      closureRepository
+        .findActionHodsForClosure({
+          closureId,
+          auditeeId: userId,
+        }),
+
+      closureRepository
+        .findPlantNameForClosure({
+          closureId,
+          auditeeId: userId,
+        }),
+    ]);
+
+  return {
+    actionHods,
+    plantName,
+  };
+}
+
 export async function saveActionPlan({
   userId,
   closureId,
   actionPlan,
   targetDate,
-  responsibleHodName,
+  actionHodId,
 }) {
   if (!userId) {
     throw new AppError(
@@ -485,22 +577,6 @@ export async function saveActionPlan({
     String(targetDate ?? "")
       .trim()
       .slice(0, 10);
-
-  const normalizedHodName =
-    String(
-      responsibleHodName ?? "",
-    ).trim();
-
-  validateActionPlanInput({
-    actionPlan:
-      normalizedActionPlan,
-
-    targetDate:
-      normalizedTargetDate,
-
-    responsibleHodName:
-      normalizedHodName,
-  });
 
   const existingClosure =
     await closureRepository
@@ -534,29 +610,116 @@ export async function saveActionPlan({
     );
   }
 
-  const savedClosure =
+  /*
+   * The Action Team HOD is chosen from a dropdown scoped to this
+   * closure's plant, never typed. The name stored on the closure is
+   * derived from the chosen user, never accepted from the client.
+   */
+  const actionHodOptions =
     await closureRepository
-      .saveActionPlan({
+      .findActionHodsForClosure({
         closureId,
         auditeeId: userId,
-
-        actionPlan:
-          normalizedActionPlan,
-
-        targetDate:
-          normalizedTargetDate,
-
-        responsibleHodName:
-          normalizedHodName,
       });
 
-  if (!savedClosure) {
+  const selectedActionHod =
+    actionHodOptions.find(
+      (hod) =>
+        Number(hod.id) ===
+        Number(actionHodId),
+    );
+
+  if (!selectedActionHod) {
     throw new AppError(
-      "The closure action plan could not be saved. Confirm that the report is assigned to the authenticated auditee and is still editable.",
-      409,
-      "ACTION_PLAN_SAVE_FAILED",
+      "Select an Action Team HOD registered at this location.",
+      400,
+      "INVALID_ACTION_HOD",
     );
   }
+
+  validateActionPlanInput({
+    actionPlan:
+      normalizedActionPlan,
+
+    targetDate:
+      normalizedTargetDate,
+
+    responsibleHodName:
+      selectedActionHod.fullName,
+  });
+
+  const savedClosure =
+    await withTransaction(
+      async (client) => {
+        const saved =
+          await closureRepository
+            .saveActionPlan(
+              {
+                closureId,
+                auditeeId: userId,
+
+                actionPlan:
+                  normalizedActionPlan,
+
+                targetDate:
+                  normalizedTargetDate,
+
+                responsibleHodName:
+                  selectedActionHod.fullName,
+
+                actionHodId:
+                  selectedActionHod.id,
+              },
+              client,
+            );
+
+        if (!saved) {
+          throw new AppError(
+            "The closure action plan could not be saved. Confirm that the report is assigned to the authenticated auditee and is still editable.",
+            409,
+            "ACTION_PLAN_SAVE_FAILED",
+          );
+        }
+
+        /*
+         * Open (or, while still OPEN, refresh) the ticket for this
+         * closure's current approval round. Failing to open a ticket
+         * must not save a plan with nobody assigned to act on it, so
+         * this runs in the same transaction as the save above.
+         */
+        await closureRepository
+          .upsertTicketForClosureRound(
+            {
+              closureId,
+
+              observationReportId:
+                saved.observation_report_id,
+
+              patrolId: saved.patrol_id,
+
+              closureRound:
+                saved.approval_iteration,
+
+              actionHodId:
+                selectedActionHod.id,
+
+              actionHodName:
+                selectedActionHod.fullName,
+
+              proposedActionPlan:
+                normalizedActionPlan,
+
+              targetDate:
+                normalizedTargetDate,
+
+              assignedBy: userId,
+            },
+            client,
+          );
+
+        return saved;
+      },
+    );
 
   const updatedClosure =
     await closureRepository

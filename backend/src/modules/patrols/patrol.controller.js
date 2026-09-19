@@ -38,3 +38,24 @@ export async function createPatrol(
     next(error);
   }
 }
+
+export async function updatePatrolAssignment(
+  req,
+  res,
+  next,
+) {
+  try {
+    const result =
+      await patrolService
+        .updatePatrolAssignment({
+          userId: req.user.id,
+          patrolId: req.params.patrolId,
+          auditorId: req.body.auditorId,
+          auditeeId: req.body.auditeeId,
+        });
+
+    res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+}

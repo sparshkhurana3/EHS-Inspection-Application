@@ -1582,6 +1582,7 @@ a { color: inherit; }
 .closure-observation,
 .closure-action-plan,
 .closure-approval,
+.ticket-action-panel,
 .patrol-form-card {
   background: #ffffff;
   border: 1px solid #e4e7ec;
@@ -1639,5 +1640,172 @@ a { color: inherit; }
   .closure-list-item {
     flex-direction: column;
     align-items: flex-start;
+  }
+}
+
+/* Tickets */
+
+.ticket-chip {
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: #f4f3ff;
+  color: #5925dc;
+  font-weight: 600;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.ticket-status-open {
+  background: #eff8ff;
+  color: #175cd3;
+}
+
+.ticket-status-in_progress {
+  background: #fffaeb;
+  color: #b54708;
+}
+
+.ticket-status-closed {
+  background: #ecfdf3;
+  color: #067647;
+}
+
+.ticket-overdue {
+  border-left-color: #b42318;
+}
+
+.ticket-evidence-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 16px 0;
+}
+
+.ticket-evidence-item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ticket-evidence-item img {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 1px solid #e4e7ec;
+}
+
+.ticket-decision-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+@media (max-width: 650px) {
+  .ticket-evidence-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Officer weekly plan (unit-wise cards) */
+
+.unit-weekly-card-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.unit-weekly-card {
+  padding: 0;
+  overflow: hidden;
+}
+
+.unit-weekly-card .weekly-summary-card {
+  width: 100%;
+  border: 0;
+  border-radius: 0;
+}
+
+.zone-assignment-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.zone-assignment-row-wrapper + .zone-assignment-row-wrapper {
+  border-top: 1px solid #eaecf0;
+}
+
+.zone-assignment-row {
+  cursor: pointer;
+  border-top: 0;
+}
+
+.zone-assignment-row select {
+  min-height: 34px;
+  padding: 4px 8px;
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+  font-size: 0.76rem;
+}
+
+.zone-assignment-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.zone-assignment-actions .button {
+  min-height: 32px;
+  padding: 6px 12px;
+  font-size: 0.72rem;
+}
+
+.weekly-status-open {
+  background: #eff8ff;
+  color: #175cd3;
+}
+
+.weekly-status-with-auditee {
+  background: #fffaeb;
+  color: #b54708;
+}
+
+.weekly-status-in-progress {
+  background: #f4f3ff;
+  color: #5925dc;
+}
+
+.weekly-status-action-required {
+  background: #fef3f2;
+  color: #b42318;
+}
+
+.weekly-status-closed {
+  background: #ecfdf3;
+  color: #067647;
+}
+
+.zone-progress-detail {
+  padding: 16px;
+  background: #f9fafb;
+  border-top: 1px solid #eaecf0;
+}
+
+.zone-progress-detail .closure-observation,
+.zone-progress-detail .closure-action-plan {
+  margin-bottom: 16px;
+}
+
+.zone-progress-detail .closure-observation:last-child,
+.zone-progress-detail .closure-action-plan:last-child {
+  margin-bottom: 0;
+}
+
+@media (max-width: 1050px) {
+  .zone-assignment-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
   }
 }

@@ -14,10 +14,14 @@ import DashboardPage from "../features/dashboard/DashboardPage.jsx";
 import ObservationPage from "../features/observations/ObservationPage.jsx";
 import ClosurePage from "../features/closures/ClosurePage.jsx";
 import PlanningPage from "../features/patrols/PlanningPage.jsx";
+import TicketPage from "../features/tickets/TicketPage.jsx";
 
 import RequireRole from "./RequireRole.jsx";
 
-import { PLANNING_ROLES } from "../constants/roles.js";
+import {
+  PLANNING_ROLES,
+  TICKET_ROLES,
+} from "../constants/roles.js";
 
 export default function AppRoutes() {
   return (
@@ -39,9 +43,21 @@ export default function AppRoutes() {
 
       {/* All authenticated pages use AppLayout */}
       <Route element={<AppLayout />}>
+        {/*
+          * The Action Team HOD's only page is Ticket; the ordinary
+          * workflow pages are off limits to them, the same as Plan is
+          * off limits to everyone else below.
+          */}
         <Route
           path="/dashboard"
-          element={<DashboardPage />}
+          element={
+            <RequireRole
+              deny={TICKET_ROLES}
+              redirectTo="/tickets"
+            >
+              <DashboardPage />
+            </RequireRole>
+          }
         />
 
         <Route
@@ -56,12 +72,26 @@ export default function AppRoutes() {
 
         <Route
           path="/observations"
-          element={<ObservationPage />}
+          element={
+            <RequireRole
+              deny={TICKET_ROLES}
+              redirectTo="/tickets"
+            >
+              <ObservationPage />
+            </RequireRole>
+          }
         />
 
         <Route
           path="/closures"
-          element={<ClosurePage />}
+          element={
+            <RequireRole
+              deny={TICKET_ROLES}
+              redirectTo="/tickets"
+            >
+              <ClosurePage />
+            </RequireRole>
+          }
         />
 
         {/* Planning is EHS Officer work; the API enforces it too. */}
@@ -70,6 +100,15 @@ export default function AppRoutes() {
           element={
             <RequireRole roles={PLANNING_ROLES}>
               <PlanningPage />
+            </RequireRole>
+          }
+        />
+
+        <Route
+          path="/tickets"
+          element={
+            <RequireRole roles={TICKET_ROLES}>
+              <TicketPage />
             </RequireRole>
           }
         />

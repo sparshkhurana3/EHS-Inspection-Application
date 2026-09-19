@@ -44,6 +44,12 @@ function ClosureCard({ closure, onOpen, variant }) {
             </span>
           ) : null}
 
+          {closure.ticketStatus ? (
+            <span className="ticket-chip">
+              Ticket: {closure.ticketDisplayStatus}
+            </span>
+          ) : null}
+
           <span>
             {closure.targetDate
               ? `Target ${formatDate(

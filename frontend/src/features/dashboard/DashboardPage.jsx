@@ -15,6 +15,7 @@ import {
 } from "../../app/authProvider.jsx";
 
 import AuditStatusCards from "./AuditStatusCards.jsx";
+import OfficerWeeklyPlan from "./OfficerWeeklyPlan.jsx";
 import WeeklySummary from "./WeeklySummary.jsx";
 import useDashboard from "./useDashboard.js";
 
@@ -113,6 +114,7 @@ export default function DashboardPage() {
     audits,
     nextAudit,
     nextWeek,
+    unitWeeks,
     loading,
     error,
     goToPreviousMonth,
@@ -237,16 +239,25 @@ export default function DashboardPage() {
       />
 
       {managementUser ? (
-        <WeeklySummary
-          week={nextWeek}
-          expanded={weeklyPlanExpanded}
-          onToggle={() => {
-            setWeeklyPlanExpanded(
-              (currentValue) =>
-                !currentValue,
-            );
-          }}
-        />
+        unitWeeks ? (
+          <OfficerWeeklyPlan
+            units={unitWeeks}
+            onAssignmentChanged={
+              reloadDashboard
+            }
+          />
+        ) : (
+          <WeeklySummary
+            week={nextWeek}
+            expanded={weeklyPlanExpanded}
+            onToggle={() => {
+              setWeeklyPlanExpanded(
+                (currentValue) =>
+                  !currentValue,
+              );
+            }}
+          />
+        )
       ) : (
         <AuditStatusCards
           audit={nextAudit}

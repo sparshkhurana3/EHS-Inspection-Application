@@ -54,19 +54,19 @@ export const saveActionPlanValidationRules = [
       "Target date must use YYYY-MM-DD format.",
     ),
 
-  body("responsibleHodName")
-    .trim()
+  body("actionHodId")
     .notEmpty()
     .withMessage(
-      "Responsible HOD name is required.",
+      "Select the Action Team HOD responsible for this plan.",
     )
     .bail()
-    .isLength({
-      max: 255,
+    .isInt({
+      min: 1,
     })
     .withMessage(
-      "Responsible HOD name cannot exceed 255 characters.",
-    ),
+      "Action Team HOD must be a positive integer.",
+    )
+    .toInt(),
 ];
 
 export const closureReviewValidationRules = [

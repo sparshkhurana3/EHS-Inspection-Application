@@ -17,10 +17,12 @@ import {
 import {
   createPatrol,
   getPlanningLookups,
+  updatePatrolAssignment,
 } from "./patrol.controller.js";
 
 import {
   createPatrolValidationRules,
+  updatePatrolAssignmentValidationRules,
 } from "./patrol.validator.js";
 
 import {
@@ -56,6 +58,20 @@ router.post(
   createPatrolValidationRules,
   validate,
   createPatrol,
+);
+
+/*
+ * Reassigns the auditor and/or auditee on an audit the officer still
+ * owns and that has not yet had an observation report filed against
+ * it. Scope to the officer's own location is enforced in the service.
+ */
+router.patch(
+  "/:patrolId/assignment",
+  authenticate,
+  authorize(...PLANNING_ROLES),
+  updatePatrolAssignmentValidationRules,
+  validate,
+  updatePatrolAssignment,
 );
 
 export default router;

@@ -16,7 +16,10 @@ import ApprovalQueuePage from "./ApprovalQueuePage.jsx";
 import ClosureList from "./ClosureList.jsx";
 import ObservationSummary from "./ObservationSummary.jsx";
 
+import TicketStatusCard from "../tickets/TicketStatusCard.jsx";
+
 import {
+  useActionHodOptions,
   useAuditeeClosures,
   useClosureDetail,
   useClosureForm,
@@ -38,6 +41,9 @@ function ClosureDetailPanel({
   } = useClosureDetail(closureId);
 
   const form = useClosureForm(closure);
+
+  const actionHodOptions =
+    useActionHodOptions(closureId);
 
   if (loading) {
     return (
@@ -124,6 +130,19 @@ function ClosureDetailPanel({
         onFieldChange={form.updateField}
         onSave={handleSave}
         onSendForApproval={handleSend}
+        actionHodOptions={
+          actionHodOptions.options
+        }
+        actionHodOptionsLoading={
+          actionHodOptions.loading
+        }
+        actionHodPlantName={
+          actionHodOptions.plantName
+        }
+      />
+
+      <TicketStatusCard
+        ticket={closure.ticket}
       />
     </section>
   );

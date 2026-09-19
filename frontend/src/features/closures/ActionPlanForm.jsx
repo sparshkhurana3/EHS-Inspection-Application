@@ -20,6 +20,9 @@ export default function ActionPlanForm({
   onFieldChange,
   onSave,
   onSendForApproval,
+  actionHodOptions,
+  actionHodOptionsLoading,
+  actionHodPlantName,
 }) {
   const editable = Boolean(
     closure?.canEditActionPlan,
@@ -119,23 +122,65 @@ export default function ActionPlanForm({
         </div>
 
         <div className="form-field">
-          <label htmlFor="responsibleHodName">
-            Responsible HOD
+          <label htmlFor="actionHodId">
+            Action Team HOD
           </label>
 
-          <input
-            id="responsibleHodName"
-            type="text"
-            maxLength={255}
-            value={values.responsibleHodName}
-            disabled={!editable || busy}
-            onChange={(event) =>
-              onFieldChange(
-                "responsibleHodName",
-                event.target.value,
-              )
-            }
-          />
+          {editable ? (
+            <>
+              <select
+                id="actionHodId"
+                value={values.actionHodId}
+                disabled={
+                  busy ||
+                  actionHodOptionsLoading ||
+                  actionHodOptions.length === 0
+                }
+                onChange={(event) =>
+                  onFieldChange(
+                    "actionHodId",
+                    event.target.value,
+                  )
+                }
+              >
+                <option value="">
+                  {actionHodOptionsLoading
+                    ? "Loading..."
+                    : "Select an Action Team HOD"}
+                </option>
+
+                {actionHodOptions.map(
+                  (hod) => (
+                    <option
+                      key={hod.id}
+                      value={hod.id}
+                    >
+                      {hod.fullName}
+                    </option>
+                  ),
+                )}
+              </select>
+
+              {!actionHodOptionsLoading &&
+              actionHodOptions.length === 0 ? (
+                <p className="closure-empty-note">
+                  No Action Team HOD is
+                  registered for{" "}
+                  {actionHodPlantName ??
+                    "this location"}
+                  . Ask the administrator to
+                  add one before saving the
+                  plan.
+                </p>
+              ) : null}
+            </>
+          ) : (
+            <p>
+              {closure?.actionHodName ??
+                closure?.responsibleHodName ??
+                "Not yet assigned."}
+            </p>
+          )}
         </div>
 
         {closure?.completionDate ? (
