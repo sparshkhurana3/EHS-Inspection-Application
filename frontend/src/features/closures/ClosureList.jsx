@@ -44,9 +44,10 @@ function ClosureCard({ closure, onOpen, variant }) {
             </span>
           ) : null}
 
-          {closure.ticketStatus ? (
-            <span className="ticket-chip">
-              Ticket: {closure.ticketDisplayStatus}
+          {closure.itemCount > 0 ? (
+            <span className="ticket-chip closure-ticket-summary-chip">
+              {closure.closedTicketCount}/
+              {closure.itemCount} tickets closed
             </span>
           ) : null}
 

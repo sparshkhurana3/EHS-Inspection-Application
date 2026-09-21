@@ -4,6 +4,7 @@ import Alert from "../../components/Alert.jsx";
 import LoadingSpinner from "../../components/LoadingSpinner.jsx";
 
 import TicketDetail from "./TicketDetail.jsx";
+import TicketHistory from "./TicketHistory.jsx";
 import TicketList from "./TicketList.jsx";
 
 import { useHodTickets } from "./useTickets.js";
@@ -15,9 +16,11 @@ export default function TicketPage() {
   const {
     open,
     inProgress,
+    pendingApproval,
     closed,
     openCount,
     inProgressCount,
+    pendingApprovalCount,
     closedCount,
     closedWindowDays,
     loading,
@@ -26,27 +29,52 @@ export default function TicketPage() {
   } = useHodTickets();
 
   const ticketId = searchParams.get("ticketId");
+  const view = searchParams.get("view") ?? "current";
+  const historyFilter =
+    searchParams.get("filter") ?? "all";
+
+  function historyParams(
+    filter = historyFilter,
+  ) {
+    return filter === "all"
+      ? { view: "history" }
+      : { view: "history", filter };
+  }
+
+  function openTicket(id) {
+    setSearchParams({
+      ...(view === "history"
+        ? historyParams()
+        : {}),
+      ticketId: String(id),
+    });
+  }
+
+  function backToList() {
+    setSearchParams(
+      view === "history" ? historyParams() : {},
+    );
+    reload();
+  }
 
   if (ticketId) {
     return (
       <TicketDetail
         ticketId={ticketId}
-        onBack={() => {
-          setSearchParams({});
-          reload();
-        }}
+        backLabel={
+          view === "history"
+            ? "Back to history"
+            : "Back to tickets"
+        }
+        onBack={backToList}
       />
     );
   }
 
-  if (loading) {
+  if (loading && view !== "history") {
     return (
       <LoadingSpinner message="Loading your tickets..." />
     );
-  }
-
-  function openTicket(id) {
-    setSearchParams({ ticketId: String(id) });
   }
 
   return (
@@ -69,6 +97,43 @@ export default function TicketPage() {
         </button>
       </header>
 
+      <div
+        className="observation-tabs"
+        role="tablist"
+      >
+        <button
+          type="button"
+          role="tab"
+          aria-selected={view !== "history"}
+          className={`observation-tab${
+            view !== "history"
+              ? " observation-tab-active"
+              : ""
+          }`}
+          onClick={() => setSearchParams({})}
+        >
+          Tickets
+        </button>
+
+        <button
+          type="button"
+          role="tab"
+          aria-selected={view === "history"}
+          className={`observation-tab${
+            view === "history"
+              ? " observation-tab-active"
+              : ""
+          }`}
+          onClick={() =>
+            setSearchParams(
+              historyParams("all"),
+            )
+          }
+        >
+          History
+        </button>
+      </div>
+
       {error ? (
         <Alert
           type="error"
@@ -78,32 +143,60 @@ export default function TicketPage() {
         </Alert>
       ) : null}
 
-      <h2>Open ({openCount})</h2>
+      {view === "history" ? (
+        <TicketHistory
+          filter={historyFilter}
+          onFilterChange={(filter) =>
+            setSearchParams(
+              historyParams(filter),
+            )
+          }
+          onOpen={openTicket}
+        />
+      ) : (
+        <>
+          <h2>Open ({openCount})</h2>
 
-      <TicketList
-        tickets={open}
-        onOpen={openTicket}
-        emptyMessage="No tickets are waiting for a decision."
-      />
+          <TicketList
+            tickets={open}
+            onOpen={openTicket}
+            emptyMessage="No tickets are waiting for a decision."
+          />
 
-      <h2>In progress ({inProgressCount})</h2>
+          <h2>
+            In progress ({inProgressCount})
+          </h2>
 
-      <TicketList
-        tickets={inProgress}
-        onOpen={openTicket}
-        emptyMessage="No tickets are in progress."
-      />
+          <TicketList
+            tickets={inProgress}
+            onOpen={openTicket}
+            emptyMessage="No tickets are in progress."
+          />
 
-      <h2>
-        Closed in the last {closedWindowDays}{" "}
-        days ({closedCount})
-      </h2>
+          <h2>
+            Pending approval (
+            {pendingApprovalCount})
+          </h2>
 
-      <TicketList
-        tickets={closed}
-        onOpen={openTicket}
-        emptyMessage="No tickets were closed in this period."
-      />
+          <TicketList
+            tickets={pendingApproval}
+            onOpen={openTicket}
+            emptyMessage="No tickets are waiting on the EHS Officer."
+          />
+
+          <h2>
+            Closed in the last{" "}
+            {closedWindowDays} days (
+            {closedCount})
+          </h2>
+
+          <TicketList
+            tickets={closed}
+            onOpen={openTicket}
+            emptyMessage="No tickets were closed in this period."
+          />
+        </>
+      )}
     </section>
   );
 }

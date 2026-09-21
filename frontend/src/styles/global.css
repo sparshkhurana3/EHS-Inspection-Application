@@ -1709,22 +1709,41 @@ a { color: inherit; }
   }
 }
 
-/* Officer weekly plan (unit-wise cards) */
+/* Officer weekly plan (single week card, grouped by unit) */
 
-.unit-weekly-card-grid {
-  display: grid;
-  gap: 16px;
-}
-
-.unit-weekly-card {
+.officer-week-card {
   padding: 0;
   overflow: hidden;
 }
 
-.unit-weekly-card .weekly-summary-card {
+.officer-week-card .weekly-summary-card {
   width: 100%;
   border: 0;
   border-radius: 0;
+}
+
+.unit-zone-section {
+  padding-top: 16px;
+}
+
+.unit-zone-section + .unit-zone-section {
+  margin-top: 6px;
+  padding-top: 18px;
+  border-top: 1px solid #eaecf0;
+}
+
+.unit-zone-section-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 8px;
+  padding: 0 14px;
+}
+
+.unit-zone-section-heading h4 {
+  margin: 0;
+  color: #1d2939;
+  font-size: 1rem;
 }
 
 .zone-assignment-list {
@@ -1808,4 +1827,349 @@ a { color: inherit; }
     grid-column: 1 / -1;
     justify-content: flex-start;
   }
+}
+
+/* Weekly roster upload */
+
+.roster-panel {
+  margin-bottom: 22px;
+  overflow: hidden;
+  border: 1px solid #dfe4e9;
+  border-radius: 15px;
+  background: #ffffff;
+  box-shadow: 0 6px 22px rgba(16, 24, 40, 0.05);
+}
+
+.roster-panel > .roster-controls,
+.roster-panel > .roster-error-table,
+.roster-panel > .patrol-summary,
+.roster-panel > .roster-table,
+.roster-panel > .alert {
+  margin: 0 22px 22px;
+}
+
+.roster-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.roster-controls input[type="file"] {
+  flex: 1 1 240px;
+  min-height: 38px;
+  padding: 6px 8px;
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+  font-size: 0.76rem;
+}
+
+.roster-error-table {
+  overflow: hidden;
+  border: 1px solid #fda29b;
+  border-radius: 12px;
+}
+
+.roster-error-table .weekly-list-header,
+.roster-error-table .weekly-list-row {
+  display: grid;
+  grid-template-columns: 70px 140px minmax(0, 1fr);
+}
+
+.roster-error-table .weekly-list-row {
+  background: #fffbfa;
+}
+
+.zone-assignment-scope {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  color: #475467;
+  font-size: 0.76rem;
+  border-top: 1px solid #eaecf0;
+  cursor: pointer;
+}
+
+/* Observations: tabs, deadline chips, repeated observation blocks, history */
+
+.observation-tabs {
+  display: flex;
+  gap: 8px;
+  margin: 18px 0 20px;
+  border-bottom: 1px solid #e4e7ec;
+}
+
+.observation-tab {
+  padding: 10px 16px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: #667085;
+  font-size: 0.82rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.observation-tab-active {
+  border-bottom-color: #087f5b;
+  color: #087f5b;
+}
+
+.observation-due {
+  display: inline-block;
+  margin-left: 10px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: #eff8ff;
+  color: #175cd3;
+  font-size: 0.66rem;
+  font-weight: 800;
+}
+
+.observation-due-overdue {
+  background: #fef3f2;
+  color: #b42318;
+}
+
+.observation-list-pending {
+  cursor: default;
+}
+
+.observation-list-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.observation-list-actions .button {
+  min-height: 32px;
+  padding: 6px 12px;
+  font-size: 0.72rem;
+}
+
+.observation-item-fieldset {
+  min-width: 0;
+  margin: 0 22px 22px;
+  padding: 18px 18px 4px;
+  border: 1px solid #d0d5dd;
+  border-radius: 12px;
+  background: #fbfcfd;
+}
+
+.observation-item-fieldset .observation-risk-fieldset,
+.observation-item-fieldset .observation-form-field {
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.observation-item-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.observation-item-heading legend {
+  float: left;
+  margin: 0;
+  color: #1d2939;
+  font-size: 0.95rem;
+  font-weight: 800;
+}
+
+.observation-item-heading .button {
+  min-height: 32px;
+  padding: 6px 12px;
+  font-size: 0.72rem;
+}
+
+.observation-add-item {
+  width: calc(100% - 44px);
+  margin: 0 22px 8px;
+}
+
+.observation-detail-item {
+  margin: 0 22px 18px;
+  padding: 4px 0 14px;
+  border: 1px solid #eaecf0;
+  border-radius: 12px;
+  background: #fbfcfd;
+}
+
+.observation-detail-item h3 {
+  margin: 16px 22px 0;
+  color: #1d2939;
+  font-size: 0.95rem;
+}
+
+.observation-detail-item .existing-report-grid {
+  padding-bottom: 10px;
+}
+
+.observation-progress {
+  margin: 0 22px 22px;
+}
+
+.observation-lifecycle-line {
+  margin: 0 0 12px;
+  color: #087f5b;
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.observation-history-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #475467;
+  font-size: 0.78rem;
+  font-weight: 750;
+}
+
+.observation-history-filter select {
+  min-height: 34px;
+  padding: 4px 8px;
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+  font-size: 0.76rem;
+}
+
+.observation-history-row {
+  grid-template-columns: 1.1fr 1.4fr 1fr 1fr 0.9fr 1.3fr;
+}
+
+@media (max-width: 760px) {
+  .observation-item-fieldset,
+  .observation-detail-item,
+  .observation-progress {
+    margin-left: 12px;
+    margin-right: 12px;
+  }
+
+  .observation-add-item {
+    width: calc(100% - 24px);
+    margin: 0 12px 8px;
+  }
+}
+
+/* Multi-observation blocks inside a closure / ticket summary */
+
+.closure-observation-item + .closure-observation-item {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid #eaecf0;
+}
+
+.closure-observation-item h4 {
+  margin: 0 22px 10px;
+  color: #1d2939;
+  font-size: 0.9rem;
+}
+
+/* Closure: one action plan per observation */
+
+.closure-item-card {
+  margin: 0 22px 22px;
+  overflow: hidden;
+  border: 1px solid #dfe4e9;
+  border-radius: 13px;
+  background: #fbfcfd;
+}
+
+.closure-item-card > form {
+  padding: 0 22px 18px;
+}
+
+.closure-item-card .closure-detail-grid {
+  padding-bottom: 6px;
+}
+
+.closure-item-card .ticket-status-card,
+.closure-item-card .closure-action-plan {
+  margin: 0 18px 18px;
+  border: 1px solid #eaecf0;
+  border-radius: 11px;
+  background: #fff;
+}
+
+.closure-item-observation {
+  padding-top: 6px;
+}
+
+.closure-item-disabled-note {
+  margin: 0 0 4px;
+  padding: 11px 13px;
+  border-radius: 9px;
+  background: #fffaeb;
+  color: #b54708;
+  font-size: 0.78rem;
+}
+
+.closure-ticket-summary-chip {
+  background: #f2f4f7;
+  color: #475467;
+}
+
+.closure-submit-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 0 22px 22px;
+}
+
+@media (max-width: 760px) {
+  .closure-item-card {
+    margin-left: 12px;
+    margin-right: 12px;
+  }
+}
+
+/* Ticket: pending approval, reopen, history, resolution */
+
+.ticket-status-pending_approval {
+  background: #fffaeb;
+  color: #b54708;
+}
+
+.ticket-reopened-tag {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #fef3f2;
+  color: #b42318;
+  font-size: 0.66rem;
+  font-weight: 800;
+}
+
+.ticket-resolution-form {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid #eaecf0;
+}
+
+.ticket-resolution-form h4 {
+  margin: 0 0 12px;
+  color: #1d2939;
+  font-size: 0.95rem;
+}
+
+.ticket-approval-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.ticket-history-row {
+  grid-template-columns: 1fr 1.5fr 1.1fr 1.1fr 0.9fr 1.1fr;
+}
+
+.closure-list-item-selected {
+  border-color: #087f5b;
+  box-shadow: 0 0 0 1px #087f5b inset;
 }

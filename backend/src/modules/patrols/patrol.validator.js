@@ -89,6 +89,11 @@ export const createPatrolValidationRules = [
     }),
 ];
 
+/*
+ * Route order in patrol.routes.js registers /roster before
+ * /:patrolId/assignment, so "roster" is never parsed here as a patrol
+ * id.
+ */
 export const updatePatrolAssignmentValidationRules = [
   param("patrolId")
     .isInt({ min: 1 })
@@ -122,6 +127,14 @@ export const updatePatrolAssignmentValidationRules = [
       "Auditee must be a positive integer.",
     )
     .toInt(),
+
+  body("applyToUpcoming")
+    .optional()
+    .isBoolean()
+    .withMessage(
+      "applyToUpcoming must be true or false.",
+    )
+    .toBoolean(),
 
   body()
     .custom((value) => {

@@ -17,13 +17,20 @@ import {
 import {
   createPatrol,
   getPlanningLookups,
+  getRoster,
   updatePatrolAssignment,
+  uploadRoster,
 } from "./patrol.controller.js";
 
 import {
   createPatrolValidationRules,
   updatePatrolAssignmentValidationRules,
 } from "./patrol.validator.js";
+
+import {
+  handleRosterUploadError,
+  uploadRosterFile,
+} from "./rosterUpload.js";
 
 import {
   PLANNING_ROLES,
@@ -40,6 +47,31 @@ router.get(
   authenticate,
   authorize(...PLANNING_ROLES),
   getPlanningLookups,
+);
+
+/*
+ * The officer's current weekly roster: one row per zone with its
+ * auditor and auditee.
+ */
+router.get(
+  "/roster",
+  authenticate,
+  authorize(...PLANNING_ROLES),
+  getRoster,
+);
+
+/*
+ * Replaces the roster and regenerates every upcoming Monday's patrol
+ * from it. Declared before /:patrolId/assignment so "roster" is never
+ * parsed as a patrol id.
+ */
+router.post(
+  "/roster",
+  authenticate,
+  authorize(...PLANNING_ROLES),
+  uploadRosterFile,
+  handleRosterUploadError,
+  uploadRoster,
 );
 
 /*

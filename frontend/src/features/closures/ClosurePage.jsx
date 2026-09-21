@@ -13,16 +13,15 @@ import {
 
 import ActionPlanForm from "./ActionPlanForm.jsx";
 import ApprovalQueuePage from "./ApprovalQueuePage.jsx";
+import TicketApprovalQueuePage from "./TicketApprovalQueuePage.jsx";
 import ClosureList from "./ClosureList.jsx";
 import ObservationSummary from "./ObservationSummary.jsx";
 
-import TicketStatusCard from "../tickets/TicketStatusCard.jsx";
-
 import {
-  useActionHodOptions,
+  useDepartmentOptions,
   useAuditeeClosures,
   useClosureDetail,
-  useClosureForm,
+  useClosureSubmission,
 } from "./useClosures.js";
 
 /**
@@ -35,15 +34,19 @@ function ClosureDetailPanel({
   const {
     closure,
     photograph,
+    photographs,
     loading,
     error,
     reload,
   } = useClosureDetail(closureId);
 
-  const form = useClosureForm(closure);
+  const submission = useClosureSubmission({
+    closureId,
+    onSubmitted: reload,
+  });
 
-  const actionHodOptions =
-    useActionHodOptions(closureId);
+  const departmentOptions =
+    useDepartmentOptions(closureId);
 
   if (loading) {
     return (
@@ -72,22 +75,6 @@ function ClosureDetailPanel({
     );
   }
 
-  async function handleSave() {
-    const result = await form.save();
-
-    if (result) {
-      reload();
-    }
-  }
-
-  async function handleSend() {
-    const result = await form.sendForApproval();
-
-    if (result) {
-      reload();
-    }
-  }
-
   return (
     <section className="closure-page">
       <header className="observation-section-header">
@@ -113,36 +100,28 @@ function ClosureDetailPanel({
       <ObservationSummary
         closure={closure}
         photograph={photograph}
+        photographs={photographs}
       />
 
       <ActionPlanForm
         closure={closure}
-        values={form.values}
-        actionPlanWordCount={
-          form.actionPlanWordCount
+        photograph={photograph}
+        photographs={photographs}
+        submitting={submission.submitting}
+        submitError={submission.error}
+        onItemSaved={reload}
+        onSendForApproval={
+          submission.sendForApproval
         }
-        maxActionPlanWords={
-          form.maxActionPlanWords
+        departmentOptions={
+          departmentOptions.options
         }
-        saving={form.saving}
-        submitting={form.submitting}
-        error={form.error}
-        onFieldChange={form.updateField}
-        onSave={handleSave}
-        onSendForApproval={handleSend}
-        actionHodOptions={
-          actionHodOptions.options
+        departmentOptionsLoading={
+          departmentOptions.loading
         }
-        actionHodOptionsLoading={
-          actionHodOptions.loading
+        plantName={
+          departmentOptions.plantName
         }
-        actionHodPlantName={
-          actionHodOptions.plantName
-        }
-      />
-
-      <TicketStatusCard
-        ticket={closure.ticket}
       />
     </section>
   );
@@ -171,13 +150,50 @@ export default function ClosurePage() {
   const closureId =
     searchParams.get("closureId");
 
-  const showApprovals =
-    searchParams.get("view") === "approvals";
+  const view = searchParams.get("view");
+  const showApprovals = view === "approvals";
+  const showTicketApprovals =
+    view === "ticket-approvals";
 
   const isOfficer = canPlanAudits(user);
 
   if (isOfficer && showApprovals) {
     return <ApprovalQueuePage />;
+  }
+
+  /*
+   * The EHS Officer reviews tickets here rather than on the Ticket
+   * page, which stays Action Team HOD only (docs/17, D7).
+   */
+  if (isOfficer && showTicketApprovals) {
+    return (
+      <section className="closure-page">
+        <header className="observation-section-header">
+          <div>
+            <span className="dashboard-eyebrow">
+              EHS Officer workflow
+            </span>
+
+            <h1>Ticket approvals</h1>
+
+            <p>
+              Tickets the Action Team HODs have
+              sent for your decision.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            className="button button-secondary"
+            onClick={() => setSearchParams({})}
+          >
+            Back to closures
+          </button>
+        </header>
+
+        <TicketApprovalQueuePage />
+      </section>
+    );
   }
 
   if (closureId) {
@@ -220,17 +236,31 @@ export default function ClosurePage() {
 
         <div className="closure-header-actions">
           {isOfficer ? (
-            <button
-              type="button"
-              className="button button-secondary"
-              onClick={() =>
-                setSearchParams({
-                  view: "approvals",
-                })
-              }
-            >
-              Review approvals
-            </button>
+            <>
+              <button
+                type="button"
+                className="button button-secondary"
+                onClick={() =>
+                  setSearchParams({
+                    view: "approvals",
+                  })
+                }
+              >
+                Closure approvals
+              </button>
+
+              <button
+                type="button"
+                className="button button-secondary"
+                onClick={() =>
+                  setSearchParams({
+                    view: "ticket-approvals",
+                  })
+                }
+              >
+                Ticket approvals
+              </button>
+            </>
           ) : null}
 
           <button

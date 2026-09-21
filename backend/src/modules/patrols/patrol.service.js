@@ -7,6 +7,10 @@ import {
 import * as patrolRepository
   from "./patrol.repository.js";
 
+import {
+  parseRosterFile,
+} from "./rosterParser.js";
+
 /**
  * Today in the server's timezone, as YYYY-MM-DD. Containers run UTC so
  * this matches the dashboard, which works in UTC throughout.
@@ -42,6 +46,54 @@ function toPositiveInteger(value) {
   return Number.isInteger(parsed) && parsed > 0
     ? parsed
     : null;
+}
+
+/**
+ * The first Monday on or after a "YYYY-MM-DD" date, as the same shape.
+ * (8 - day) % 7: Sunday (0) -> +1, Monday (1) -> +0, ... Saturday (6) -> +2.
+ */
+function getFirstMondayOnOrAfter(dateOnly) {
+  const date = new Date(
+    `${dateOnly}T00:00:00Z`,
+  );
+
+  date.setUTCDate(
+    date.getUTCDate() +
+      ((8 - date.getUTCDay()) % 7),
+  );
+
+  return date
+    .toISOString()
+    .slice(0, 10);
+}
+
+/**
+ * Every Monday from firstMonday to lastDate inclusive, as
+ * "YYYY-MM-DD" strings.
+ */
+function listMondays(firstMonday, lastDate) {
+  const mondays = [];
+
+  let cursor = new Date(
+    `${firstMonday}T00:00:00Z`,
+  );
+
+  const end = new Date(
+    `${lastDate}T00:00:00Z`,
+  );
+
+  while (cursor.getTime() <= end.getTime()) {
+    mondays.push(
+      cursor.toISOString().slice(0, 10),
+    );
+
+    cursor = new Date(
+      cursor.getTime() +
+        7 * 24 * 60 * 60 * 1000,
+    );
+  }
+
+  return mondays;
 }
 
 /**
@@ -289,29 +341,12 @@ export async function schedulePatrol(input) {
         );
       }
 
-      const conflict =
-        await patrolRepository
-          .findSchedulingConflict(
-            {
-              scheduledDate,
-              auditorId,
-              auditeeId,
-            },
-            client,
-          );
-
-      if (conflict) {
-        throw new AppError(
-          conflict.conflict_type === "AUDITOR"
-            ? "The selected auditor already has an audit scheduled on this date."
-            : "The selected auditee already has an audit scheduled on this date.",
-          409,
-          conflict.conflict_type === "AUDITOR"
-            ? "AUDITOR_SCHEDULING_CONFLICT"
-            : "AUDITEE_SCHEDULING_CONFLICT",
-        );
-      }
-
+      /*
+       * One person may audit, or be audited on, several zones on the
+       * same day: the only rule is that they cannot be both sides of
+       * the same zone, which validateScheduleInput and the patrols
+       * table's own CHECK both enforce.
+       */
       const createdId =
         await patrolRepository.createPatrol(
           {
@@ -397,6 +432,12 @@ function validateAssignmentInput({
  * Only reachable while the patrol is still SCHEDULED: no observation
  * report has been filed and no closure opened, so nothing yet refers to
  * the people being replaced.
+ *
+ * When applyToUpcoming is true (the default), the change is propagated
+ * to every SCHEDULED patrol for the same zone from the edited patrol's
+ * date to 31 December of that year, roster-generated or manually
+ * planned alike, and the zone's roster row (if any) is updated to
+ * match. When false, only the one patrol changes.
  */
 export async function updatePatrolAssignment(
   input,
@@ -417,6 +458,11 @@ export async function updatePatrolAssignment(
       "PATROL_NOT_FOUND",
     );
   }
+
+  const applyToUpcoming =
+    input.applyToUpcoming !== false;
+
+  let updatedCount = 0;
 
   await withTransaction(async (client) => {
     const location =
@@ -483,56 +529,529 @@ export async function updatePatrolAssignment(
       );
     }
 
-    const conflict =
+    if (!applyToUpcoming) {
+      const updated =
+        await patrolRepository
+          .updatePatrolAssignment(
+            { patrolId, auditorId, auditeeId },
+            client,
+          );
+
+      if (!updated) {
+        throw new AppError(
+          "The auditor and auditee can only be changed before an observation report has been filed for this audit.",
+          409,
+          "PATROL_NOT_EDITABLE",
+        );
+      }
+
+      updatedCount = 1;
+      return;
+    }
+
+    const fromDate = toDateOnlyString(
+      existingPatrol.scheduledDate,
+    );
+
+    const toDate =
+      `${fromDate.slice(0, 4)}-12-31`;
+
+    const targets =
       await patrolRepository
-        .findSchedulingConflict(
+        .findUpcomingZonePatrolsForAssignment(
           {
-            scheduledDate:
-              toDateOnlyString(
-                existingPatrol.scheduledDate,
-              ),
-            auditorId,
-            auditeeId,
-            excludePatrolId: patrolId,
+            zoneId: existingPatrol.zoneId,
+            fromDate,
+            toDate,
           },
           client,
         );
 
-    if (conflict) {
-      throw new AppError(
-        conflict.conflict_type === "AUDITOR"
-          ? "The selected auditor already has an audit scheduled on this date."
-          : "The selected auditee already has an audit scheduled on this date.",
-        409,
-        conflict.conflict_type === "AUDITOR"
-          ? "AUDITOR_SCHEDULING_CONFLICT"
-          : "AUDITEE_SCHEDULING_CONFLICT",
-      );
-    }
+    /*
+     * target.id comes back from `pg` as a string (BIGINT), while
+     * patrolId is the parsed number from the route param, so the
+     * membership check below needs both sides normalized the same way.
+     */
+    const targetIds = targets.map(
+      (target) => Number(target.id),
+    );
 
-    const updated =
-      await patrolRepository
-        .updatePatrolAssignment(
-          { patrolId, auditorId, auditeeId },
-          client,
-        );
-
-    if (!updated) {
+    if (!targetIds.includes(patrolId)) {
       throw new AppError(
         "The auditor and auditee can only be changed before an observation report has been filed for this audit.",
         409,
         "PATROL_NOT_EDITABLE",
       );
     }
+
+    updatedCount =
+      await patrolRepository
+        .updatePatrolAssignments(
+          {
+            patrolIds: targetIds,
+            auditorId,
+            auditeeId,
+          },
+          client,
+        );
+
+    if (updatedCount === 0) {
+      throw new AppError(
+        "The auditor and auditee can only be changed before an observation report has been filed for this audit.",
+        409,
+        "PATROL_NOT_EDITABLE",
+      );
+    }
+
+    await patrolRepository
+      .updateRosterAssignmentForZone(
+        {
+          zoneId: existingPatrol.zoneId,
+          auditorId,
+          auditeeId,
+        },
+        client,
+      );
   });
 
   return {
-    message:
-      "Audit assignment updated successfully.",
+    message: applyToUpcoming
+      ? `Assignment updated for ${updatedCount} upcoming audit${
+          updatedCount === 1 ? "" : "s"
+        } of this zone.`
+      : "Audit assignment updated successfully.",
+
+    updatedCount,
 
     patrol:
       await patrolRepository.findPatrolById(
         patrolId,
       ),
+  };
+}
+
+/*
+ * ---------------------------------------------------------------------
+ * Weekly roster: one-time upload that generates every upcoming Monday's
+ * patrol per zone. See docs/14-weekly-roster-plan.md.
+ * ---------------------------------------------------------------------
+ */
+
+const MAX_ROSTER_ROW_ERRORS = 100;
+
+/**
+ * The officer's current roster, one row per zone.
+ */
+export async function getRoster({ userId }) {
+  const location =
+    await requireOfficerLocation(userId);
+
+  const rows =
+    await patrolRepository.findRosterForPlant(
+      location.id,
+    );
+
+  return {
+    location,
+
+    roster: {
+      effectiveFrom:
+        rows[0]?.effectiveFrom ?? null,
+      effectiveTo:
+        rows[0]?.effectiveTo ?? null,
+      rows,
+    },
+  };
+}
+
+/**
+ * Parses an uploaded roster file, resolves every row against the
+ * officer's own plant, and, if every row is valid, replaces the roster
+ * and regenerates every upcoming Monday's patrols from it. All or
+ * nothing: any row error rolls back the whole upload untouched.
+ */
+export async function uploadRoster({
+  userId,
+  file,
+}) {
+  if (!file) {
+    throw new AppError(
+      "Select a .csv or .xlsx file to upload.",
+      400,
+      "ROSTER_FILE_REQUIRED",
+    );
+  }
+
+  let parsed;
+
+  try {
+    parsed = await parseRosterFile({
+      buffer: file.buffer,
+      originalName: file.originalname,
+    });
+  } catch {
+    throw new AppError(
+      "The file could not be read. Check that it is a valid .csv or .xlsx file.",
+      400,
+      "ROSTER_UNREADABLE",
+    );
+  }
+
+  const { rows, errors: parseErrors } = parsed;
+
+  if (parseErrors.length > 0) {
+    throw new AppError(
+      "The roster file could not be read. Fix the listed rows and upload it again.",
+      400,
+      "ROSTER_INVALID",
+      parseErrors.slice(
+        0,
+        MAX_ROSTER_ROW_ERRORS,
+      ),
+    );
+  }
+
+  if (rows.length === 0) {
+    throw new AppError(
+      "The roster file has no rows to schedule.",
+      400,
+      "ROSTER_EMPTY",
+    );
+  }
+
+  const firstMonday =
+    getFirstMondayOnOrAfter(
+      getCurrentDate(),
+    );
+
+  const currentYear = Number(
+    firstMonday.slice(0, 4),
+  );
+
+  const lastDate = `${currentYear}-12-31`;
+
+  if (firstMonday > lastDate) {
+    throw new AppError(
+      "There are no Mondays left this year to schedule.",
+      400,
+      "NO_MONDAYS_REMAINING",
+    );
+  }
+
+  const summary = await withTransaction(
+    async (client) => {
+      const location =
+        await requireOfficerLocation(
+          userId,
+          client,
+        );
+
+      const scope =
+        await patrolRepository
+          .findRosterLookupScope(
+            location.id,
+            client,
+          );
+
+      const emails = [
+        ...new Set(
+          rows.flatMap((row) => [
+            row.auditorEmail,
+            row.auditeeEmail,
+          ]),
+        ),
+      ];
+
+      const usersByEmail =
+        await patrolRepository
+          .findActiveUsersByEmail(
+            {
+              plantId: location.id,
+              emails,
+              excludeUserId: userId,
+            },
+            client,
+          );
+
+      const normalizedLocationName =
+        location.name.trim().toLowerCase();
+
+      const normalizedLocationCode = (
+        location.code ?? ""
+      )
+        .trim()
+        .toLowerCase();
+
+      const errors = [];
+      const resolvedRows = [];
+      const seenZoneIds = new Map();
+
+      for (const row of rows) {
+        const rowLocation =
+          row.location.toLowerCase();
+
+        if (
+          rowLocation !==
+            normalizedLocationName &&
+          (normalizedLocationCode === "" ||
+            rowLocation !==
+              normalizedLocationCode)
+        ) {
+          errors.push({
+            row: row.rowNumber,
+            field: "location",
+            message: `Location "${row.location}" is not the location you are responsible for (${location.name}).`,
+          });
+
+          continue;
+        }
+
+        const rowUnitText =
+          row.unit.toLowerCase();
+
+        const unitEntries = scope.filter(
+          (entry) =>
+            String(entry.unitName ?? "")
+              .trim()
+              .toLowerCase() ===
+              rowUnitText ||
+            String(entry.unitCode ?? "")
+              .trim()
+              .toLowerCase() ===
+              rowUnitText ||
+            String(entry.unitNumber ?? "")
+              .trim()
+              .toLowerCase() ===
+              rowUnitText,
+        );
+
+        if (unitEntries.length === 0) {
+          errors.push({
+            row: row.rowNumber,
+            field: "unit",
+            message: `Unit "${row.unit}" was not found at ${location.name}.`,
+          });
+
+          continue;
+        }
+
+        const rowZoneText =
+          row.zone.toLowerCase();
+
+        const zoneEntry = unitEntries.find(
+          (entry) =>
+            String(entry.zoneName ?? "")
+              .trim()
+              .toLowerCase() ===
+              rowZoneText ||
+            String(entry.zoneCode ?? "")
+              .trim()
+              .toLowerCase() ===
+              rowZoneText ||
+            String(entry.zoneNumber ?? "")
+              .trim()
+              .toLowerCase() ===
+              rowZoneText,
+        );
+
+        if (!zoneEntry) {
+          errors.push({
+            row: row.rowNumber,
+            field: "zone",
+            message: `Zone "${row.zone}" was not found in unit ${row.unit}.`,
+          });
+
+          continue;
+        }
+
+        if (zoneEntry.areaCount === 0) {
+          errors.push({
+            row: row.rowNumber,
+            field: "zone",
+            message:
+              "The selected zone has no areas configured, so an audit cannot be scheduled for it.",
+          });
+
+          continue;
+        }
+
+        if (
+          seenZoneIds.has(zoneEntry.zoneId)
+        ) {
+          errors.push({
+            row: row.rowNumber,
+            field: "zone",
+            message: `Zone ${row.zone} appears more than once (also row ${seenZoneIds.get(zoneEntry.zoneId)}).`,
+          });
+
+          continue;
+        }
+
+        const auditor = usersByEmail.get(
+          row.auditorEmail,
+        );
+
+        const auditee = usersByEmail.get(
+          row.auditeeEmail,
+        );
+
+        let rowValid = true;
+
+        if (!auditor) {
+          errors.push({
+            row: row.rowNumber,
+            field: "auditorEmail",
+            message: `No active user at ${location.name} has the email ${row.auditorEmail}.`,
+          });
+
+          rowValid = false;
+        }
+
+        if (!auditee) {
+          errors.push({
+            row: row.rowNumber,
+            field: "auditeeEmail",
+            message: `No active user at ${location.name} has the email ${row.auditeeEmail}.`,
+          });
+
+          rowValid = false;
+        }
+
+        if (
+          auditor &&
+          auditee &&
+          auditor.id === auditee.id
+        ) {
+          errors.push({
+            row: row.rowNumber,
+            field: "auditeeEmail",
+            message:
+              "The auditor and auditee must be different users.",
+          });
+
+          rowValid = false;
+        }
+
+        if (!rowValid) {
+          continue;
+        }
+
+        seenZoneIds.set(
+          zoneEntry.zoneId,
+          row.rowNumber,
+        );
+
+        resolvedRows.push({
+          unitId: zoneEntry.unitId,
+          zoneId: zoneEntry.zoneId,
+          auditorId: auditor.id,
+          auditeeId: auditee.id,
+        });
+      }
+
+      if (errors.length > 0) {
+        throw new AppError(
+          `The roster file could not be read. ${errors.length} row${
+            errors.length === 1 ? "" : "s"
+          } need fixing.`,
+          400,
+          "ROSTER_INVALID",
+          errors.slice(
+            0,
+            MAX_ROSTER_ROW_ERRORS,
+          ),
+        );
+      }
+
+      const mondays = listMondays(
+        firstMonday,
+        lastDate,
+      );
+
+      const zoneIds = resolvedRows.map(
+        (row) => row.zoneId,
+      );
+
+      /*
+       * No person-level conflict scan: one auditor or auditee may cover
+       * several zones on the same Monday. A zone that already has a
+       * patrol for a given Monday is skipped by generateRosterPatrols'
+       * own NOT EXISTS check, so a hand-planned audit keeps its place.
+       */
+      const patrolsReplaced =
+        await patrolRepository
+          .deleteUpcomingRosterPatrols(
+            {
+              plantId: location.id,
+              fromDate: firstMonday,
+            },
+            client,
+          );
+
+      await patrolRepository
+        .deleteRosterRowsNotIn(
+          {
+            plantId: location.id,
+            zoneIds,
+          },
+          client,
+        );
+
+      for (const row of resolvedRows) {
+        await patrolRepository
+          .upsertRosterRow(
+            {
+              plantId: location.id,
+              unitId: row.unitId,
+              zoneId: row.zoneId,
+              auditorId: row.auditorId,
+              auditeeId: row.auditeeId,
+              effectiveFrom: firstMonday,
+              effectiveTo: lastDate,
+              uploadedBy: userId,
+              sourceFileName:
+                file.originalname ?? null,
+            },
+            client,
+          );
+      }
+
+      const patrolsCreated =
+        await patrolRepository
+          .generateRosterPatrols(
+            {
+              plantId: location.id,
+              plantName: location.name,
+              firstMonday,
+              lastDate,
+              ehsOfficerId: userId,
+            },
+            client,
+          );
+
+      return {
+        zones: resolvedRows.length,
+        mondays: mondays.length,
+        firstMonday,
+        lastDate,
+        patrolsCreated,
+        patrolsReplaced,
+      };
+    },
+  );
+
+  const { roster } = await getRoster({
+    userId,
+  });
+
+  return {
+    message: `Roster uploaded. ${summary.zones} zone${
+      summary.zones === 1 ? "" : "s"
+    } scheduled for ${summary.mondays} Monday${
+      summary.mondays === 1 ? "" : "s"
+    } from ${summary.firstMonday} to ${summary.lastDate}.`,
+
+    roster,
+    summary,
   };
 }

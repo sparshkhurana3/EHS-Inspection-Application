@@ -60,9 +60,28 @@ stateDiagram-v2
     REEXAMINATION_REQUIRED --> PENDING_EHS_APPROVAL : (planned) resubmit
 ```
 
-`OPEN` is only the column default and is never inserted. The service's normaliser maps `COMPLETED`/`APPROVED` → `CLOSED`, but those values violate the CHECK constraint, so the branch is unreachable.
+`OPEN` is only the column default and is never inserted by the multi-observation path. **"No observation to record"** (`POST /api/observations/no-observation`) inserts `CLOSED` directly with `no_observations = true`, opens **no** closure, and moves the patrol straight to `COMPLETED` — the one path where an audit finishes without an auditee ever acting.
+
+**The auditor's own view of a report is binary** and derived, not stored: `OPEN` while no report exists, `CLOSED` once one does (either sent to the auditee or closed with no observations). The stored column above still drives the auditee/officer loop. The API also returns `lifecycleStatus`/`lifecycleLabel` summarising the whole journey: `NO_OBSERVATIONS`, `CLOSED_VIA_TICKET` (the latest ticket is `CLOSED` — this wins over a later closure approval), `EHS_OFFICER_ACTION_REQUIRED`, `APPROVED`, `ACTION_PLAN_IN_PROGRESS`, else `WITH_AUDITEE`.
+
+**Deadline.** A report is due by **Thursday of the audit's ISO week** (`dueDate` = Monday + 3 days). Past that it is flagged `isOverdue` and kept in the auditor's pending list for 4 more weeks, but submission is never blocked.
+
+### `action_tickets.status` (docs/17)
+
+```
+OPEN ──accept──► IN_PROGRESS ──submit-resolution (1-3 photos + comments)──► PENDING_APPROVAL (ACCEPTED)
+  │                                                                          │ approve (officer) → CLOSED
+  │                                                                          └ reopen  (officer) → OPEN (cleared)
+  └──reject (comments)──► PENDING_APPROVAL (REJECTED) ─ approve → CLOSED
+                                                      └ reopen  → OPEN (cleared)
+```
+
+The Action Team HOD never closes a ticket: the EHS Officer does, from the Closures page. A reopen deletes the evidence rows and files and clears the HOD's decision, keeping only the plan snapshot and a required reason.
 
 ### `closure_requests.status`
+
+Derived, not set by hand (docs/16): `OPEN` while any observation lacks a plan or its department has not accepted the ticket, `IN_PROGRESS` once every observation is with a department, then the existing review loop. The auditee sends the whole closure for approval only once **every** observation's ticket is `CLOSED`; the EHS Officer's approval is what makes it `APPROVED` ("Closed"). A rejection advances `approval_iteration`, reopening every observation for rework with fresh tickets.
+
 
 ```mermaid
 stateDiagram-v2

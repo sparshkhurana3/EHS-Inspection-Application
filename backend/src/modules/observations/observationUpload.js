@@ -66,19 +66,24 @@ function fileFilter(
   callback(null, true);
 }
 
+const MAX_OBSERVATIONS_PER_REPORT = 10;
+
 const upload = multer({
   storage,
 
   limits: {
     fileSize: MAX_IMAGE_SIZE,
-    files: 1,
+    files: MAX_OBSERVATIONS_PER_REPORT,
   },
 
   fileFilter,
 });
 
-export const uploadObservationPhotograph =
-  upload.single("photograph");
+export const uploadObservationPhotographs =
+  upload.array(
+    "photographs",
+    MAX_OBSERVATIONS_PER_REPORT,
+  );
 
 export function handleObservationUploadError(
   error,
@@ -92,7 +97,7 @@ export function handleObservationUploadError(
     if (error.code === "LIMIT_FILE_SIZE") {
       next(
         new AppError(
-          "The observation photograph must be 10 MB or smaller.",
+          "Each observation photograph must be 10 MB or smaller.",
           400,
           "OBSERVATION_IMAGE_TOO_LARGE",
         ),
@@ -101,10 +106,14 @@ export function handleObservationUploadError(
       return;
     }
 
-    if (error.code === "LIMIT_FILE_COUNT") {
+    if (
+      error.code === "LIMIT_FILE_COUNT" ||
+      error.code ===
+        "LIMIT_UNEXPECTED_FILE"
+    ) {
       next(
         new AppError(
-          "Only one observation photograph is allowed.",
+          "Up to 10 photographs can be attached, one per observation.",
           400,
           "TOO_MANY_OBSERVATION_IMAGES",
         ),
@@ -115,7 +124,7 @@ export function handleObservationUploadError(
 
     next(
       new AppError(
-        "The observation photograph could not be uploaded.",
+        "The observation photographs could not be uploaded.",
         400,
         "OBSERVATION_UPLOAD_FAILED",
       ),

@@ -30,6 +30,7 @@ export function updatePatrolAssignment({
   patrolId,
   auditorId,
   auditeeId,
+  applyToUpcoming = true,
 }) {
   return apiRequest(
     `/patrols/${encodeURIComponent(
@@ -40,7 +41,25 @@ export function updatePatrolAssignment({
       body: JSON.stringify({
         auditorId: Number(auditorId),
         auditeeId: Number(auditeeId),
+        applyToUpcoming,
       }),
     },
   );
+}
+
+export function fetchRoster() {
+  return apiRequest("/patrols/roster", {
+    method: "GET",
+  });
+}
+
+export function uploadRoster(file) {
+  const body = new FormData();
+
+  body.append("roster", file);
+
+  return apiRequest("/patrols/roster", {
+    method: "POST",
+    body,
+  });
 }

@@ -20,12 +20,12 @@ import {
 
 import {
   approveClosure,
-  getActionHodOptions,
+  getDepartmentOptions,
   getAuditeeClosures,
   getClosureById,
   getPendingApprovals,
   rejectClosure,
-  saveActionPlan,
+  saveClosureItem,
   submitClosure,
 } from "./closure.controller.js";
 
@@ -33,7 +33,7 @@ import {
   closureIdValidationRules,
   closureReviewValidationRules,
   rejectClosureValidationRules,
-  saveActionPlanValidationRules,
+  saveClosureItemValidationRules,
 } from "./closure.validator.js";
 
 const router = Router();
@@ -74,19 +74,23 @@ router.get(
  * there is no route-order ambiguity between them.
  */
 router.get(
-  "/:closureId/action-hods",
+  "/:closureId/departments",
   authenticate,
   closureIdValidationRules,
   validate,
-  getActionHodOptions,
+  getDepartmentOptions,
 );
 
+/*
+ * One action plan per observation: the item id says which observation
+ * on this closure's report the plan belongs to.
+ */
 router.patch(
-  "/:closureId/action-plan",
+  "/:closureId/items/:closureItemId/action-plan",
   authenticate,
-  saveActionPlanValidationRules,
+  saveClosureItemValidationRules,
   validate,
-  saveActionPlan,
+  saveClosureItem,
 );
 
 /*

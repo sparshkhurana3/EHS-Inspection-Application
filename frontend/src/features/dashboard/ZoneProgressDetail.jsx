@@ -1,12 +1,10 @@
 import Alert from "../../components/Alert.jsx";
 import LoadingSpinner from "../../components/LoadingSpinner.jsx";
 
-import { formatDate } from "../../lib/errorMessage.js";
-
 import ObservationSummary from "../closures/ObservationSummary.jsx";
 import { useClosureDetail } from "../closures/useClosures.js";
 
-import TicketStatusCard from "../tickets/TicketStatusCard.jsx";
+import ClosureItemSummary from "../closures/ClosureItemSummary.jsx";
 
 /**
  * Everything filed against one zone's audit so far: the observation
@@ -21,6 +19,7 @@ export default function ZoneProgressDetail({
   const {
     closure,
     photograph,
+    photographs,
     loading,
     error,
   } = useClosureDetail(closureId);
@@ -47,48 +46,27 @@ export default function ZoneProgressDetail({
       <ObservationSummary
         closure={closure}
         photograph={photograph}
+        photographs={photographs}
       />
 
-      <section className="closure-action-plan">
-        <h3>Action plan</h3>
+      {(closure.items ?? []).length === 0 ? (
+        <section className="closure-action-plan">
+          <h3>Action plan</h3>
 
-        <div className="closure-detail-grid">
-          <div>
-            <span>Assigned to</span>
-            <strong>
-              {closure.actionHodName ??
-                closure.responsibleHodName ??
-                "Not yet assigned"}
-            </strong>
-          </div>
-
-          <div>
-            <span>Target date</span>
-            <strong>
-              {formatDate(closure.targetDate)}
-            </strong>
-          </div>
-
-          <div>
-            <span>Status</span>
-            <strong>
-              {closure.displayStatus}
-            </strong>
-          </div>
-        </div>
-
-        <div className="observation-detail-body">
-          <span>Action plan</span>
-          <p>
-            {closure.actionPlan ??
-              "Not yet submitted."}
+          <p className="closure-empty-note">
+            No action plan has been proposed yet.
           </p>
-        </div>
-      </section>
+        </section>
+      ) : (
+        closure.items.map((item) => (
+          <ClosureItemSummary
+            key={item.id}
+            item={item}
+            total={closure.items.length}
+          />
+        ))
+      )}
 
-      <TicketStatusCard
-        ticket={closure.ticket}
-      />
     </div>
   );
 }

@@ -15,7 +15,7 @@ import {
 } from "../../app/authProvider.jsx";
 
 import AuditStatusCards from "./AuditStatusCards.jsx";
-import OfficerWeeklyPlan from "./OfficerWeeklyPlan.jsx";
+import OfficerWeekCard from "./OfficerWeekCard.jsx";
 import WeeklySummary from "./WeeklySummary.jsx";
 import useDashboard from "./useDashboard.js";
 
@@ -114,7 +114,7 @@ export default function DashboardPage() {
     audits,
     nextAudit,
     nextWeek,
-    unitWeeks,
+    officerWeek,
     loading,
     error,
     goToPreviousMonth,
@@ -239,9 +239,10 @@ export default function DashboardPage() {
       />
 
       {managementUser ? (
-        unitWeeks ? (
-          <OfficerWeeklyPlan
-            units={unitWeeks}
+        normalizeRole(role) ===
+        "EHS_OFFICER" ? (
+          <OfficerWeekCard
+            week={officerWeek}
             onAssignmentChanged={
               reloadDashboard
             }

@@ -137,19 +137,99 @@ export async function removeEvidence(
   }
 }
 
-export async function closeTicket(
+export async function submitResolution(
   req,
   res,
   next,
 ) {
   try {
     const result =
-      await ticketService.closeTicket({
+      await ticketService
+        .submitResolution({
+          userId: req.user.id,
+          ticketId: req.params.ticketId,
+
+          resolutionComments:
+            req.body.resolutionComments,
+
+          correctiveActionTypeId:
+            req.body.correctiveActionTypeId,
+        });
+
+    res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getHodTicketHistory(
+  req,
+  res,
+  next,
+) {
+  try {
+    const result =
+      await ticketService
+        .getHodTicketHistory({
+          userId: req.user.id,
+          filter:
+            req.query.filter ?? "all",
+        });
+
+    res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getPendingTicketApprovals(
+  req,
+  res,
+  next,
+) {
+  try {
+    const result =
+      await ticketService
+        .getPendingTicketApprovals({
+          userId: req.user.id,
+        });
+
+    res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function approveTicket(
+  req,
+  res,
+  next,
+) {
+  try {
+    const result =
+      await ticketService.approveTicket({
         userId: req.user.id,
         ticketId: req.params.ticketId,
+        comments: req.body.comments,
+      });
 
-        completionNotes:
-          req.body.completionNotes,
+    res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function reopenTicket(
+  req,
+  res,
+  next,
+) {
+  try {
+    const result =
+      await ticketService.reopenTicket({
+        userId: req.user.id,
+        ticketId: req.params.ticketId,
+        comments: req.body.comments,
       });
 
     res.status(200).json(result);

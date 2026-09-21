@@ -1,7 +1,6 @@
-import PhotographInput from "./PhotographInput.jsx";
-import RiskSelector from "./RiskSelector.jsx";
-
 import { formatDate } from "../../lib/errorMessage.js";
+
+import ObservationItemFields from "./ObservationItemFields.jsx";
 
 function ReadOnlyField({ label, value }) {
   return (
@@ -12,21 +11,32 @@ function ReadOnlyField({ label, value }) {
   );
 }
 
+/**
+ * The report form: the once-only header (week, location, unit, zone,
+ * people, finding date) followed by one repeated block per observation
+ * and an "Add another observation" control, up to ten.
+ */
 export default function ObservationCard({
   assignment,
   formValues,
-  descriptionWordCount,
+  maxObservations,
   maxDescriptionWords,
   submitting,
   onFieldChange,
-  onPhotographChange,
-  onPhotographRemove,
+  onItemFieldChange,
+  onItemPhotographChange,
+  onItemPhotographRemove,
+  onAddObservation,
+  onRemoveObservation,
   onSubmit,
   onCancel,
 }) {
   const areas = Array.isArray(assignment?.areas)
     ? assignment.areas
     : [];
+
+  const observations = formValues.observations;
+  const atLimit = observations.length >= maxObservations;
 
   function handleSubmit(event) {
     event.preventDefault();
@@ -42,6 +52,13 @@ export default function ObservationCard({
           </span>
 
           <h2>Patrol Observation Report</h2>
+
+          {assignment?.dueDate ? (
+            <p>
+              Due by {formatDate(assignment.dueDate)}
+              {assignment.isOverdue ? " · overdue" : ""}
+            </p>
+          ) : null}
         </div>
 
         <button
@@ -61,13 +78,19 @@ export default function ObservationCard({
         */}
       <div className="observation-assignment-grid">
         <ReadOnlyField
-          label="Audit date"
-          value={formatDate(
-            assignment?.scheduledDate,
-          )}
+          label="Week number"
+          value={
+            assignment?.weekNumber
+              ? `Week ${assignment.weekNumber}`
+              : null
+          }
         />
         <ReadOnlyField
-          label="Plant"
+          label="Audit date"
+          value={formatDate(assignment?.scheduledDate)}
+        />
+        <ReadOnlyField
+          label="Location"
           value={assignment?.plantLocation}
         />
         <ReadOnlyField
@@ -77,6 +100,10 @@ export default function ObservationCard({
         <ReadOnlyField
           label="Zone"
           value={assignment?.zoneName}
+        />
+        <ReadOnlyField
+          label="Auditor"
+          value={assignment?.auditorName}
         />
         <ReadOnlyField
           label="Auditee"
@@ -120,152 +147,55 @@ export default function ObservationCard({
           />
         </div>
 
-        {/*
-          * A patrol covers the whole zone, so the auditor names the
-          * area the finding was actually in. The options are that
-          * zone's own fixed areas, loaded from the database.
-          */}
-        <div className="form-field">
-          <label htmlFor="zoneAreaId">
-            Area of observation
-            <span
-              className="required-marker"
-              aria-hidden="true"
-            >
-              {" *"}
-            </span>
-          </label>
-
-          {areas.length === 0 ? (
-            <p className="observation-empty-note">
-              No areas are configured for this
-              zone, so an observation cannot be
-              recorded. Ask your EHS Officer to
-              configure them.
-            </p>
-          ) : (
-            <select
-              id="zoneAreaId"
-              required
-              aria-required="true"
-              value={formValues.zoneAreaId}
+        {areas.length === 0 ? (
+          <p className="observation-empty-note">
+            No areas are configured for this zone, so
+            an observation cannot be recorded. Ask
+            your EHS Officer to configure them.
+          </p>
+        ) : (
+          observations.map((item, index) => (
+            <ObservationItemFields
+              key={item.key}
+              index={index}
+              total={observations.length}
+              item={item}
+              areas={areas}
               disabled={submitting}
-              onChange={(event) =>
-                onFieldChange(
-                  "zoneAreaId",
-                  event.target.value,
-                )
+              maxDescriptionWords={maxDescriptionWords}
+              onFieldChange={onItemFieldChange}
+              onPhotographChange={
+                onItemPhotographChange
               }
-            >
-              <option value="">
-                Select the area
-              </option>
+              onPhotographRemove={
+                onItemPhotographRemove
+              }
+              onRemove={onRemoveObservation}
+            />
+          ))
+        )}
 
-              {areas.map((area) => (
-                <option
-                  key={area.id}
-                  value={area.id}
-                >
-                  {area.name}
-                </option>
-              ))}
-            </select>
-          )}
-        </div>
-
-        <div className="form-field">
-          <label htmlFor="category">
-            Category
-            <span
-              className="required-marker"
-              aria-hidden="true"
-            >
-              {" *"}
-            </span>
-          </label>
-
-          <select
-            id="category"
-            required
-            aria-required="true"
-            value={formValues.category}
-            disabled={submitting}
-            onChange={(event) =>
-              onFieldChange(
-                "category",
-                event.target.value,
-              )
-            }
-          >
-            <option value="">
-              Select the category
-            </option>
-            <option value="UC">
-              UC - Unsafe Condition
-            </option>
-            <option value="UA">
-              UA - Unsafe Act
-            </option>
-          </select>
-        </div>
-
-        <PhotographInput
-          photograph={formValues.photograph}
-          photographPreview={
-            formValues.photographPreview
+        <button
+          type="button"
+          className="button button-secondary observation-add-item"
+          onClick={onAddObservation}
+          disabled={
+            submitting || atLimit || areas.length === 0
           }
-          disabled={submitting}
-          onChange={onPhotographChange}
-          onRemove={onPhotographRemove}
-        />
+        >
+          Add another observation
+        </button>
 
-        <div className="form-field">
-          <label htmlFor="description">
-            Observation description
-            <span
-              className="required-marker"
-              aria-hidden="true"
-            >
-              {" *"}
-            </span>
-          </label>
-
-          <textarea
-            id="description"
-            rows="8"
-            required
-            aria-required="true"
-            aria-describedby="description-count"
-            value={formValues.description}
-            disabled={submitting}
-            onChange={(event) =>
-              onFieldChange(
-                "description",
-                event.target.value,
-              )
-            }
-          />
-
-          <span id="description-count">
-            {descriptionWordCount}/
-            {maxDescriptionWords} words
-          </span>
-        </div>
-
-        <RiskSelector
-          value={formValues.riskCategory}
-          disabled={submitting}
-          onChange={(value) =>
-            onFieldChange("riskCategory", value)
-          }
-        />
+        <p className="observation-empty-note">
+          {atLimit
+            ? `Up to ${maxObservations} observations per report.`
+            : `${observations.length} of ${maxObservations} observations.`}
+        </p>
 
         <button
           type="submit"
           className="button button-primary"
-          disabled={
-            submitting || areas.length === 0
-          }
+          disabled={submitting || areas.length === 0}
         >
           {submitting
             ? "Sending observation..."

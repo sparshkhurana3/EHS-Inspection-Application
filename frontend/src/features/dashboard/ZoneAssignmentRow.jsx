@@ -14,6 +14,8 @@ const STATUS_CLASS_BY_CODE = {
   EHS_OFFICER_ACTION_REQUIRED:
     "weekly-status-action-required",
   CLOSED: "weekly-status-closed",
+  CLOSED_NO_OBSERVATIONS:
+    "weekly-status-closed",
 };
 
 /**
@@ -37,14 +39,23 @@ export default function ZoneAssignmentRow({
     zone.auditeeId,
   );
 
+  const [
+    applyToUpcoming,
+    setApplyToUpcoming,
+  ] = useState(true);
+
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [successMessage, setSuccessMessage] =
+    useState("");
 
   function startEditing(event) {
     event.stopPropagation();
     setAuditorId(zone.auditorId);
     setAuditeeId(zone.auditeeId);
+    setApplyToUpcoming(true);
     setError("");
+    setSuccessMessage("");
     setEditing(true);
   }
 
@@ -69,11 +80,13 @@ export default function ZoneAssignmentRow({
 
     setSaving(true);
     setError("");
+    setSuccessMessage("");
 
     const result = await onSaveAssignment({
       patrolId: zone.patrolId,
       auditorId,
       auditeeId,
+      applyToUpcoming,
     });
 
     setSaving(false);
@@ -83,6 +96,9 @@ export default function ZoneAssignmentRow({
       return;
     }
 
+    setSuccessMessage(
+      result?.message ?? "",
+    );
     setEditing(false);
   }
 
@@ -239,8 +255,36 @@ export default function ZoneAssignmentRow({
         </span>
       </div>
 
+      {editing ? (
+        <label
+          className="zone-assignment-scope"
+          onClick={(event) =>
+            event.stopPropagation()
+          }
+        >
+          <input
+            type="checkbox"
+            checked={applyToUpcoming}
+            disabled={saving}
+            onChange={(event) =>
+              setApplyToUpcoming(
+                event.target.checked,
+              )
+            }
+          />
+          Apply to every upcoming Monday
+          for this zone until 31 December
+        </label>
+      ) : null}
+
       {error ? (
         <Alert type="error">{error}</Alert>
+      ) : null}
+
+      {successMessage ? (
+        <Alert type="success">
+          {successMessage}
+        </Alert>
       ) : null}
 
       {detailOpen ? (

@@ -16,7 +16,7 @@ export const databasePool = new Pool({
       }
     : false,
 
-  max: 10,
+  max: 15,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000,
 });

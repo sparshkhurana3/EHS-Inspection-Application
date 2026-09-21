@@ -44,7 +44,7 @@ export default function useDashboard() {
       audits: [],
       nextAudit: null,
       nextWeek: null,
-      unitWeeks: null,
+      officerWeek: null,
     });
 
   const [loading, setLoading] =
@@ -81,8 +81,8 @@ export default function useDashboard() {
           nextWeek:
             data?.nextWeek ?? null,
 
-          unitWeeks:
-            data?.unitWeeks ?? null,
+          officerWeek:
+            data?.officerWeek ?? null,
         });
       } catch (requestError) {
         setDashboardData({
@@ -90,7 +90,7 @@ export default function useDashboard() {
           audits: [],
           nextAudit: null,
           nextWeek: null,
-          unitWeeks: null,
+          officerWeek: null,
         });
 
         setError(
@@ -159,8 +159,8 @@ export default function useDashboard() {
       dashboardData.nextAudit,
     nextWeek:
       dashboardData.nextWeek,
-    unitWeeks:
-      dashboardData.unitWeeks,
+    officerWeek:
+      dashboardData.officerWeek,
     loading,
     error,
     goToPreviousMonth,

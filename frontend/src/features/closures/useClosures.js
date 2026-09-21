@@ -7,16 +7,17 @@ import {
 
 import {
   approveClosureReport,
-  fetchActionHodOptions,
+  fetchDepartmentOptions,
   fetchAuditeeClosures,
   fetchClosureById,
   fetchPendingApprovals,
   rejectClosureReport,
-  saveClosureActionPlan,
+  saveClosureItem,
   submitClosureReport,
 } from "./closure.service.js";
 
 import {
+  fetchObservationItemPhotograph,
   fetchObservationPhotograph,
 } from "../observations/observation.service.js";
 
@@ -95,16 +96,27 @@ export function useAuditeeClosures() {
 }
 
 /**
- * One closure with its photograph, for the detail and form views.
+ * One closure with every observation's photograph, for the detail and
+ * form views. `photograph` stays as observation #1's image for callers
+ * that show a single one; `photographs` is keyed by observation id.
  */
 export function useClosureDetail(closureId) {
   const [closure, setClosure] = useState(null);
   const [photograph, setPhotograph] =
     useState("");
+  const [photographs, setPhotographs] =
+    useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const previewRef = useRef("");
+  const urlsRef = useRef([]);
+
+  const revokeAll = useCallback(() => {
+    urlsRef.current.forEach((url) =>
+      URL.revokeObjectURL(url),
+    );
+    urlsRef.current = [];
+  }, []);
 
   const load = useCallback(async () => {
     if (!closureId) {
@@ -121,27 +133,55 @@ export function useClosureDetail(closureId) {
       const loaded = result?.closure ?? null;
       setClosure(loaded);
 
-      if (loaded?.observationReportId) {
+      revokeAll();
+      setPhotograph("");
+      setPhotographs({});
+
+      const reportId =
+        loaded?.observationReportId;
+
+      if (reportId) {
         try {
           const blob =
             await fetchObservationPhotograph(
-              loaded.observationReportId,
+              reportId,
             );
-
-          if (previewRef.current) {
-            URL.revokeObjectURL(
-              previewRef.current,
-            );
-          }
 
           const url =
             URL.createObjectURL(blob);
 
-          previewRef.current = url;
+          urlsRef.current.push(url);
           setPhotograph(url);
         } catch {
           /* the report is still worth showing without its photo */
           setPhotograph("");
+        }
+
+        const observations =
+          loaded.observations ?? [];
+
+        if (observations.length > 0) {
+          const entries = await Promise.all(
+            observations.map((item) =>
+              fetchObservationItemPhotograph(
+                reportId,
+                item.id,
+              )
+                .then((blob) => {
+                  const url =
+                    URL.createObjectURL(blob);
+
+                  urlsRef.current.push(url);
+
+                  return [item.id, url];
+                })
+                .catch(() => [item.id, ""]),
+            ),
+          );
+
+          setPhotographs(
+            Object.fromEntries(entries),
+          );
         }
       }
     } catch (requestError) {
@@ -150,25 +190,18 @@ export function useClosureDetail(closureId) {
     } finally {
       setLoading(false);
     }
-  }, [closureId]);
+  }, [closureId, revokeAll]);
 
   useEffect(() => {
     load();
   }, [load]);
 
-  useEffect(
-    () => () => {
-      if (previewRef.current) {
-        URL.revokeObjectURL(previewRef.current);
-        previewRef.current = "";
-      }
-    },
-    [],
-  );
+  useEffect(() => revokeAll, [revokeAll]);
 
   return {
     closure,
     photograph,
+    photographs,
     loading,
     error,
     reload: load,
@@ -176,10 +209,11 @@ export function useClosureDetail(closureId) {
 }
 
 /**
- * The Action Team HOD options for this closure's assignment dropdown,
- * scoped to the closure's own plant. Loaded once per closure.
+ * The departments this closure's observations can be assigned to,
+ * scoped to its own plant, each with the Action Team HOD the ticket
+ * will go to. Loaded once per closure and shared by every observation.
  */
-export function useActionHodOptions(closureId) {
+export function useDepartmentOptions(closureId) {
   const [options, setOptions] = useState([]);
   const [plantName, setPlantName] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -195,13 +229,13 @@ export function useActionHodOptions(closureId) {
     setLoading(true);
     setError("");
 
-    fetchActionHodOptions(closureId)
+    fetchDepartmentOptions(closureId)
       .then((result) => {
         if (cancelled) {
           return;
         }
 
-        setOptions(result?.actionHods ?? []);
+        setOptions(result?.departments ?? []);
         setPlantName(result?.plantName ?? null);
       })
       .catch((requestError) => {
@@ -238,35 +272,43 @@ export function useActionHodOptions(closureId) {
  * target date intact, so the form opens with an empty plan field and
  * the original commitment still in place.
  */
-export function useClosureForm(closure) {
+/**
+ * One observation's action plan. Each observation is an independent
+ * unit — its own plan, its own department, its own ticket — so the form
+ * state is per item and keyed to it, and saving one does not touch the
+ * others.
+ */
+export function useClosureItemForm({
+  closureId,
+  item,
+  onSaved,
+}) {
   const [values, setValues] = useState({
     actionPlan: "",
     targetDate: "",
-    actionHodId: "",
+    departmentId: "",
   });
 
   const [saving, setSaving] = useState(false);
-  const [submitting, setSubmitting] =
-    useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
     setValues({
-      actionPlan: closure?.actionPlan ?? "",
+      actionPlan: item?.actionPlan ?? "",
       targetDate: toDateInputValue(
-        closure?.targetDate,
+        item?.targetDate,
       ),
-      actionHodId: closure?.actionHodId
-        ? String(closure.actionHodId)
+      departmentId: item?.departmentId
+        ? String(item.departmentId)
         : "",
     });
 
     setError("");
   }, [
-    closure?.id,
-    closure?.actionPlan,
-    closure?.targetDate,
-    closure?.actionHodId,
+    item?.id,
+    item?.actionPlan,
+    item?.targetDate,
+    item?.departmentId,
   ]);
 
   const updateField = useCallback(
@@ -285,11 +327,6 @@ export function useClosureForm(closure) {
         return;
       }
 
-      /*
-       * This used to spread a variable named fieldValue, creating a key
-       * literally called "fieldValue", so the controlled inputs could
-       * never be typed into.
-       */
       setValues((current) => ({
         ...current,
         [name]: value,
@@ -299,17 +336,17 @@ export function useClosureForm(closure) {
   );
 
   const save = useCallback(async () => {
-    if (saving || submitting) {
+    if (saving) {
       return null;
     }
 
     if (
       !values.actionPlan.trim() ||
       !values.targetDate ||
-      !values.actionHodId
+      !values.departmentId
     ) {
       setError(
-        "Complete the action plan, target date, and Action Team HOD.",
+        "Complete the action plan, target date, and department for this observation.",
       );
 
       return null;
@@ -319,39 +356,24 @@ export function useClosureForm(closure) {
     setError("");
 
     try {
-      return await saveClosureActionPlan({
-        closureId: closure.id,
+      const result = await saveClosureItem({
+        closureId,
+        closureItemId: item.id,
         actionPlan: values.actionPlan,
         targetDate: values.targetDate,
-        actionHodId: values.actionHodId,
+        departmentId: values.departmentId,
       });
+
+      await onSaved?.();
+
+      return result;
     } catch (requestError) {
       setError(getErrorMessage(requestError));
       return null;
     } finally {
       setSaving(false);
     }
-  }, [closure, values, saving, submitting]);
-
-  const sendForApproval = useCallback(async () => {
-    if (saving || submitting) {
-      return null;
-    }
-
-    setSubmitting(true);
-    setError("");
-
-    try {
-      return await submitClosureReport(
-        closure.id,
-      );
-    } catch (requestError) {
-      setError(getErrorMessage(requestError));
-      return null;
-    } finally {
-      setSubmitting(false);
-    }
-  }, [closure, saving, submitting]);
+  }, [closureId, item, values, saving, onSaved]);
 
   return {
     values,
@@ -361,12 +383,51 @@ export function useClosureForm(closure) {
     maxActionPlanWords:
       MAX_ACTION_PLAN_WORDS,
     saving,
-    submitting,
     error,
     updateField,
     save,
-    sendForApproval,
   };
+}
+
+/**
+ * Sending the whole closure to the EHS Officer, once every observation
+ * has a plan and every department has resolved its ticket.
+ */
+export function useClosureSubmission({
+  closureId,
+  onSubmitted,
+}) {
+  const [submitting, setSubmitting] =
+    useState(false);
+  const [error, setError] = useState("");
+
+  const sendForApproval =
+    useCallback(async () => {
+      if (submitting) {
+        return null;
+      }
+
+      setSubmitting(true);
+      setError("");
+
+      try {
+        const result =
+          await submitClosureReport(closureId);
+
+        await onSubmitted?.();
+
+        return result;
+      } catch (requestError) {
+        setError(
+          getErrorMessage(requestError),
+        );
+        return null;
+      } finally {
+        setSubmitting(false);
+      }
+    }, [closureId, submitting, onSubmitted]);
+
+  return { submitting, error, sendForApproval };
 }
 
 /**

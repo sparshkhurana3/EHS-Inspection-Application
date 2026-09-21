@@ -14,8 +14,17 @@ export const closureIdValidationRules = [
     .toInt(),
 ];
 
-export const saveActionPlanValidationRules = [
+export const saveClosureItemValidationRules = [
   ...closureIdValidationRules,
+
+  param("closureItemId")
+    .isInt({
+      min: 1,
+    })
+    .withMessage(
+      "Closure item ID must be a positive integer.",
+    )
+    .toInt(),
 
   body("actionPlan")
     .trim()
@@ -54,17 +63,17 @@ export const saveActionPlanValidationRules = [
       "Target date must use YYYY-MM-DD format.",
     ),
 
-  body("actionHodId")
+  body("departmentId")
     .notEmpty()
     .withMessage(
-      "Select the Action Team HOD responsible for this plan.",
+      "Select the department responsible for this plan.",
     )
     .bail()
     .isInt({
       min: 1,
     })
     .withMessage(
-      "Action Team HOD must be a positive integer.",
+      "Department must be a positive integer.",
     )
     .toInt(),
 ];

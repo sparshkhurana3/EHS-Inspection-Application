@@ -7,17 +7,22 @@ import {
 
 import {
   acceptTicket,
-  closeTicket,
+  approveTicket,
   deleteTicketEvidence,
   fetchHodTickets,
+  fetchPendingTicketApprovals,
   fetchTicketById,
   fetchTicketEvidenceBlob,
+  fetchTicketHistory,
   fetchTicketLookups,
   rejectTicket,
+  reopenTicket,
+  submitTicketResolution,
   uploadTicketEvidence,
 } from "./ticket.service.js";
 
 import {
+  fetchObservationItemPhotograph,
   fetchObservationPhotograph,
 } from "../observations/observation.service.js";
 
@@ -43,9 +48,11 @@ export function useHodTickets() {
   const [data, setData] = useState({
     open: [],
     inProgress: [],
+    pendingApproval: [],
     closed: [],
     openCount: 0,
     inProgressCount: 0,
+    pendingApprovalCount: 0,
     closedCount: 0,
     closedWindowDays: 30,
   });
@@ -63,10 +70,14 @@ export function useHodTickets() {
       setData({
         open: result?.open ?? [],
         inProgress: result?.inProgress ?? [],
+        pendingApproval:
+          result?.pendingApproval ?? [],
         closed: result?.closed ?? [],
         openCount: result?.openCount ?? 0,
         inProgressCount:
           result?.inProgressCount ?? 0,
+        pendingApprovalCount:
+          result?.pendingApprovalCount ?? 0,
         closedCount:
           result?.closedCount ?? 0,
         closedWindowDays:
@@ -133,6 +144,8 @@ export function useTicketDetail(ticketId) {
   const [ticket, setTicket] = useState(null);
   const [photograph, setPhotograph] =
     useState("");
+  const [photographs, setPhotographs] =
+    useState({});
   const [evidenceUrls, setEvidenceUrls] =
     useState({});
   const [loading, setLoading] = useState(true);
@@ -164,6 +177,7 @@ export function useTicketDetail(ticketId) {
 
       revokeAll();
       setPhotograph("");
+      setPhotographs({});
       setEvidenceUrls({});
 
       if (loaded?.observationReportId) {
@@ -180,6 +194,38 @@ export function useTicketDetail(ticketId) {
           setPhotograph(url);
         } catch {
           setPhotograph("");
+        }
+
+        const observations =
+          loaded.observations ?? [];
+
+        if (observations.length > 0) {
+          const photographEntries =
+            await Promise.all(
+              observations.map((item) =>
+                fetchObservationItemPhotograph(
+                  loaded.observationReportId,
+                  item.id,
+                )
+                  .then((blob) => {
+                    const url =
+                      URL.createObjectURL(blob);
+
+                    objectUrlsRef.current.push(
+                      url,
+                    );
+
+                    return [item.id, url];
+                  })
+                  .catch(() => [item.id, ""]),
+              ),
+            );
+
+          setPhotographs(
+            Object.fromEntries(
+              photographEntries,
+            ),
+          );
         }
       }
 
@@ -227,6 +273,7 @@ export function useTicketDetail(ticketId) {
   return {
     ticket,
     photograph,
+    photographs,
     evidenceUrls,
     loading,
     error,
@@ -498,25 +545,72 @@ export function useTicketEvidence(ticket, onChanged) {
 /**
  * Closing an in-progress ticket once the work is done on the ground.
  */
-export function useCloseTicket(ticket, onChanged) {
-  const [completionNotes, setCompletionNotes] =
-    useState("");
-  const [closing, setClosing] = useState(false);
+/**
+ * The HOD's resolution: what was done, the type of work actually
+ * carried out, and the photographs already attached. Sent to the EHS
+ * Officer rather than closing the ticket directly.
+ */
+export function useSubmitResolution(
+  ticket,
+  onChanged,
+) {
+  const [
+    resolutionComments,
+    setResolutionComments,
+  ] = useState("");
+
+  const [
+    correctiveActionTypeId,
+    setCorrectiveActionTypeId,
+  ] = useState("");
+
+  const [submitting, setSubmitting] =
+    useState(false);
   const [error, setError] = useState("");
 
-  const close = useCallback(async () => {
-    if (closing) {
+  useEffect(() => {
+    setResolutionComments(
+      ticket?.resolutionComments ?? "",
+    );
+
+    setCorrectiveActionTypeId(
+      ticket?.correctiveActionTypeId
+        ? String(
+            ticket.correctiveActionTypeId,
+          )
+        : "",
+    );
+
+    setError("");
+  }, [
+    ticket?.id,
+    ticket?.resolutionComments,
+    ticket?.correctiveActionTypeId,
+  ]);
+
+  const submit = useCallback(async () => {
+    if (submitting) {
       return null;
     }
 
-    setClosing(true);
+    if (!resolutionComments.trim()) {
+      setError(
+        "Describe what was done before submitting the resolution.",
+      );
+
+      return null;
+    }
+
+    setSubmitting(true);
     setError("");
 
     try {
-      const result = await closeTicket({
-        ticketId: ticket.id,
-        completionNotes,
-      });
+      const result =
+        await submitTicketResolution({
+          ticketId: ticket.id,
+          resolutionComments,
+          correctiveActionTypeId,
+        });
 
       onChanged?.();
       return result;
@@ -524,15 +618,174 @@ export function useCloseTicket(ticket, onChanged) {
       setError(getErrorMessage(requestError));
       return null;
     } finally {
-      setClosing(false);
+      setSubmitting(false);
     }
-  }, [ticket, completionNotes, closing, onChanged]);
+  }, [
+    ticket,
+    resolutionComments,
+    correctiveActionTypeId,
+    submitting,
+    onChanged,
+  ]);
 
   return {
-    completionNotes,
-    setCompletionNotes,
-    closing,
+    resolutionComments,
+    setResolutionComments,
+    correctiveActionTypeId,
+    setCorrectiveActionTypeId,
+    submitting,
     error,
-    close,
+    submit,
+  };
+}
+
+/**
+ * The HOD's six-month history, for one filter.
+ */
+export function useTicketHistory(filter) {
+  const [tickets, setTickets] = useState([]);
+  const [count, setCount] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError("");
+
+    try {
+      const result =
+        await fetchTicketHistory(filter);
+
+      setTickets(
+        Array.isArray(result?.tickets)
+          ? result.tickets
+          : [],
+      );
+
+      setCount(result?.count ?? 0);
+    } catch (requestError) {
+      setError(getErrorMessage(requestError));
+      setTickets([]);
+      setCount(0);
+    } finally {
+      setLoading(false);
+    }
+  }, [filter]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  return {
+    tickets,
+    count,
+    loading,
+    error,
+    reload: load,
+  };
+}
+
+/**
+ * The EHS Officer's ticket review queue: approve and close, or send it
+ * back to the Action Team HOD.
+ */
+export function useTicketApprovals() {
+  const [tickets, setTickets] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError("");
+
+    try {
+      const result =
+        await fetchPendingTicketApprovals();
+
+      setTickets(
+        Array.isArray(result?.tickets)
+          ? result.tickets
+          : [],
+      );
+    } catch (requestError) {
+      setError(getErrorMessage(requestError));
+      setTickets([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const approve = useCallback(
+    async (ticketId, comments) => {
+      if (busy) {
+        return null;
+      }
+
+      setBusy(true);
+      setError("");
+
+      try {
+        const result = await approveTicket({
+          ticketId,
+          comments,
+        });
+
+        await load();
+        return result;
+      } catch (requestError) {
+        setError(
+          getErrorMessage(requestError),
+        );
+        return null;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [busy, load],
+  );
+
+  const reopen = useCallback(
+    async (ticketId, comments) => {
+      if (busy) {
+        return null;
+      }
+
+      setBusy(true);
+      setError("");
+
+      try {
+        const result = await reopenTicket({
+          ticketId,
+          comments,
+        });
+
+        await load();
+        return result;
+      } catch (requestError) {
+        setError(
+          getErrorMessage(requestError),
+        );
+        return null;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [busy, load],
+  );
+
+  return {
+    tickets,
+    count: tickets.length,
+    loading,
+    busy,
+    error,
+    approve,
+    reopen,
+    reload: load,
   };
 }

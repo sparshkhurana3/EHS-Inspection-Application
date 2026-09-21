@@ -15,13 +15,20 @@ import AppError
 import * as ticketRepository
   from "./ticket.repository.js";
 
+import {
+  recomputeClosureStatus,
+} from "../closures/closureStatus.js";
+
 const CLOSED_WINDOW_DAYS = 30;
 
 const MAX_EVIDENCE_FILES = 3;
 
+const HISTORY_WINDOW_MONTHS = 6;
+
 const STATUS_LABELS = {
   OPEN: "Open",
   IN_PROGRESS: "In Progress",
+  PENDING_APPROVAL: "Pending Approval",
   CLOSED: "Closed",
 };
 
@@ -109,9 +116,33 @@ function createTicketResponse(
     canAddEvidence:
       normalizedStatus === "IN_PROGRESS",
 
-    canClose:
+    /*
+     * The HOD sends their work to the EHS Officer rather than closing
+     * the ticket themselves (docs/17, D5): at least one photograph is
+     * needed, and the resolution comments are checked on submit.
+     */
+    canSubmitResolution:
       normalizedStatus === "IN_PROGRESS" &&
-      resolvedEvidenceCount >= 1,
+      resolvedEvidenceCount >= 1 &&
+      resolvedEvidenceCount <=
+        MAX_EVIDENCE_FILES,
+
+    awaitingApproval:
+      normalizedStatus ===
+      "PENDING_APPROVAL",
+
+    /* What the officer is being asked to approve. */
+    pendingOutcome:
+      normalizedStatus ===
+      "PENDING_APPROVAL"
+        ? (ticket.decision === "REJECTED"
+            ? "REJECTION"
+            : "RESOLUTION")
+        : null,
+
+    wasReopened:
+      normalizedStatus === "OPEN" &&
+      Number(ticket.reopenCount ?? 0) > 0,
 
     isOverdue:
       normalizedStatus !== "CLOSED" &&
@@ -171,6 +202,11 @@ export async function getHodTickets({
       ticket.status === "IN_PROGRESS",
   );
 
+  const pendingApproval = decorated.filter(
+    (ticket) =>
+      ticket.status === "PENDING_APPROVAL",
+  );
+
   const closed = decorated.filter(
     (ticket) =>
       ticket.status === "CLOSED",
@@ -181,11 +217,63 @@ export async function getHodTickets({
 
     openCount: open.length,
     inProgressCount: inProgress.length,
+    pendingApprovalCount:
+      pendingApproval.length,
     closedCount: closed.length,
 
     open,
     inProgress,
+    pendingApproval,
     closed,
+  };
+}
+
+/**
+ * Every ticket assigned to this HOD in the last six months, open or
+ * closed, optionally filtered by status (docs/17, D8).
+ */
+export async function getHodTicketHistory({
+  userId,
+  filter = "all",
+}) {
+  const fromDate = new Date();
+
+  fromDate.setUTCMonth(
+    fromDate.getUTCMonth() -
+      HISTORY_WINDOW_MONTHS,
+  );
+
+  const tickets =
+    await ticketRepository
+      .findTicketHistoryForHod({
+        hodId: userId,
+        fromDate: fromDate
+          .toISOString()
+          .slice(0, 10),
+        filter,
+      });
+
+  const evidenceCounts =
+    await Promise.all(
+      tickets.map((ticket) =>
+        ticketRepository.countEvidence(
+          ticket.id,
+        ),
+      ),
+    );
+
+  return {
+    windowMonths: HISTORY_WINDOW_MONTHS,
+    filter,
+    count: tickets.length,
+
+    tickets: tickets.map(
+      (ticket, index) =>
+        createTicketResponse(ticket, {
+          evidenceCount:
+            evidenceCounts[index],
+        }),
+    ),
   };
 }
 
@@ -244,8 +332,9 @@ export async function getTicketLookups() {
 
 /**
  * Accept or reject the proposed plan. Accept moves the ticket to
- * IN_PROGRESS; reject closes it immediately, since no work is done on
- * the ground for a rejected plan.
+ * IN_PROGRESS; reject sends it to the EHS Officer, who closes it or
+ * sends it back (docs/17, D4). No work is done on the ground for a
+ * rejected plan either way.
  */
 async function decideTicket({
   userId,
@@ -370,6 +459,16 @@ async function decideTicket({
         "TICKET_STATUS_CHANGED",
       );
     }
+
+    /*
+     * The closure's status is derived from every observation and its
+     * ticket, so it moves with this decision, in the same transaction
+     * (docs/16-closure-refinement-plan.md, D5).
+     */
+    await recomputeClosureStatus(
+      existing.closureRequestId,
+      client,
+    );
   });
 
   return getTicketById({
@@ -378,7 +477,7 @@ async function decideTicket({
   }).then((result) => ({
     message: accept
       ? "Action plan accepted."
-      : "Action plan rejected and ticket closed.",
+      : "Action plan rejected and sent to the EHS Officer for approval.",
 
     ticket: result.ticket,
   }));
@@ -586,14 +685,47 @@ export async function removeEvidence({
  * Close an in-progress ticket once the work is done on the ground.
  * Requires at least one evidence photograph.
  */
-export async function closeTicket({
+/**
+ * The HOD's completed work goes to the EHS Officer for approval, with
+ * the evidence photographs and a written resolution (docs/17, D5).
+ */
+export async function submitResolution({
   userId,
   ticketId,
-  completionNotes,
+  resolutionComments,
+  correctiveActionTypeId,
 }) {
-  const normalizedNotes = String(
-    completionNotes ?? "",
+  const normalizedComments = String(
+    resolutionComments ?? "",
   ).trim();
+
+  if (!normalizedComments) {
+    throw new AppError(
+      "Describe what was done before submitting the resolution.",
+      400,
+      "RESOLUTION_COMMENTS_REQUIRED",
+    );
+  }
+
+  let resolvedTypeId = null;
+
+  if (correctiveActionTypeId) {
+    const type =
+      await ticketRepository
+        .findCorrectiveActionTypeById(
+          correctiveActionTypeId,
+        );
+
+    if (!type) {
+      throw new AppError(
+        "Select a valid type of corrective action.",
+        400,
+        "INVALID_CORRECTIVE_ACTION_TYPE",
+      );
+    }
+
+    resolvedTypeId = type.id;
+  }
 
   await withTransaction(async (client) => {
     const existing =
@@ -634,30 +766,38 @@ export async function closeTicket({
 
     if (evidenceCount < 1) {
       throw new AppError(
-        "Attach at least one evidence photograph before closing the ticket.",
+        "Attach at least one evidence photograph before submitting the resolution.",
         400,
         "EVIDENCE_REQUIRED_TO_CLOSE",
       );
     }
 
     const updated =
-      await ticketRepository.closeTicket(
-        {
-          ticketId,
-          hodId: userId,
-          completionNotes:
-            normalizedNotes || null,
-        },
-        client,
-      );
+      await ticketRepository
+        .submitResolution(
+          {
+            ticketId,
+            hodId: userId,
+            resolutionComments:
+              normalizedComments,
+            correctiveActionTypeId:
+              resolvedTypeId,
+          },
+          client,
+        );
 
     if (!updated) {
       throw new AppError(
-        "This ticket was already closed. Reload and try again.",
+        "This ticket was already submitted. Reload and try again.",
         409,
         "TICKET_STATUS_CHANGED",
       );
     }
+
+    await recomputeClosureStatus(
+      existing.closureRequestId,
+      client,
+    );
   });
 
   const result = await getTicketById({
@@ -666,9 +806,192 @@ export async function closeTicket({
   });
 
   return {
-    message: "Ticket closed.",
+    message:
+      "Resolution sent to the EHS Officer for approval.",
+
     ticket: result.ticket,
   };
+}
+
+/**
+ * Every ticket waiting on this EHS Officer's decision.
+ */
+export async function getPendingTicketApprovals({
+  userId,
+}) {
+  const tickets =
+    await ticketRepository
+      .findTicketsPendingApproval({
+        userId,
+      });
+
+  const evidenceLists =
+    await Promise.all(
+      tickets.map((ticket) =>
+        ticketRepository
+          .findEvidenceForTicket(
+            ticket.id,
+          ),
+      ),
+    );
+
+  return {
+    count: tickets.length,
+
+    tickets: tickets.map(
+      (ticket, index) =>
+        createTicketResponse(ticket, {
+          evidence: evidenceLists[index],
+        }),
+    ),
+  };
+}
+
+/*
+ * Shared by approve and reopen: both act on a ticket that is waiting on
+ * the officer, and both move the closure's derived status.
+ */
+async function reviewTicket({
+  userId,
+  ticketId,
+  comments,
+  approve,
+}) {
+  let evidencePathsToDelete = [];
+
+  await withTransaction(async (client) => {
+    const existing =
+      await ticketRepository
+        .findTicketByIdForApprover(
+          {
+            ticketId,
+            userId,
+            forUpdate: true,
+          },
+          client,
+        );
+
+    if (!existing) {
+      throw new AppError(
+        "The ticket was not found.",
+        404,
+        "TICKET_NOT_FOUND",
+      );
+    }
+
+    if (
+      normalizeStatus(existing.status) !==
+      "PENDING_APPROVAL"
+    ) {
+      throw new AppError(
+        "This ticket is not awaiting approval.",
+        409,
+        "TICKET_NOT_AWAITING_APPROVAL",
+      );
+    }
+
+    const updated = approve
+      ? await ticketRepository.approveTicket(
+          {
+            ticketId,
+            approverId: userId,
+            comments: comments || null,
+          },
+          client,
+        )
+      : await ticketRepository.reopenTicket(
+          {
+            ticketId,
+            approverId: userId,
+            comments,
+          },
+          client,
+        );
+
+    if (!updated) {
+      throw new AppError(
+        "This ticket was reviewed by someone else. Reload and try again.",
+        409,
+        "TICKET_STATUS_CHANGED",
+      );
+    }
+
+    /*
+     * Reopening clears what the HOD attached, so they start again
+     * (docs/17, D6). The files are unlinked only once the transaction
+     * has committed: a rolled-back reopen must not lose photographs.
+     */
+    if (!approve) {
+      evidencePathsToDelete =
+        await ticketRepository
+          .deleteEvidenceForTicket(
+            ticketId,
+            client,
+          );
+    }
+
+    await recomputeClosureStatus(
+      existing.closureRequestId,
+      client,
+    );
+  });
+
+  await Promise.all(
+    evidencePathsToDelete.map((filePath) =>
+      safelyDeleteFile(filePath),
+    ),
+  );
+
+  const result = await getTicketById({
+    userId,
+    ticketId,
+  });
+
+  return {
+    message: approve
+      ? "Ticket approved and closed."
+      : "Ticket reopened and sent back to the Action Team HOD.",
+
+    ticket: result.ticket,
+  };
+}
+
+export async function approveTicket({
+  userId,
+  ticketId,
+  comments,
+}) {
+  return reviewTicket({
+    userId,
+    ticketId,
+    comments: String(comments ?? "").trim(),
+    approve: true,
+  });
+}
+
+export async function reopenTicket({
+  userId,
+  ticketId,
+  comments,
+}) {
+  const normalizedComments = String(
+    comments ?? "",
+  ).trim();
+
+  if (!normalizedComments) {
+    throw new AppError(
+      "Explain what the Action Team HOD needs to redo before reopening the ticket.",
+      400,
+      "REOPEN_COMMENTS_REQUIRED",
+    );
+  }
+
+  return reviewTicket({
+    userId,
+    ticketId,
+    comments: normalizedComments,
+    approve: false,
+  });
 }
 
 /**

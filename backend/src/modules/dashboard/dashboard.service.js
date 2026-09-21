@@ -271,14 +271,25 @@ const ZONE_STATUS_LABELS = {
   EHS_OFFICER_ACTION_REQUIRED:
     "EHS Officer Action Required",
   CLOSED: "Closed",
+  CLOSED_NO_OBSERVATIONS:
+    "Closed – no observations",
 };
 
 function getZoneStatusCode({
   observationReportId,
+  noObservations,
   closureStatus,
 }) {
   if (!observationReportId) {
     return "OPEN";
+  }
+
+  /*
+   * "No observation to record": the report exists but nothing was
+   * found, so no closure was ever opened and the audit is done.
+   */
+  if (noObservations) {
+    return "CLOSED_NO_OBSERVATIONS";
   }
 
   const normalizedClosureStatus = String(
@@ -309,12 +320,15 @@ function getZoneStatusCode({
 }
 
 /**
- * Groups the flat unit/zone rows from findOfficerUnitWeeklyPlans into
- * one card per unit. A unit with nothing scheduled keeps its card
- * (zones: []), so the officer always sees one card per unit they
- * manage, exactly as many as they manage.
+ * Groups the flat zone rows from findOfficerWeekPatrols into a single
+ * card for the plant's next upcoming inspection week, its zones
+ * grouped by unit. Null when nothing is scheduled.
  */
-function buildOfficerUnitWeeklyPlans(rows) {
+function buildOfficerWeek(rows) {
+  if (rows.length === 0) {
+    return null;
+  }
+
   const unitsById = new Map();
 
   for (const row of rows) {
@@ -323,19 +337,14 @@ function buildOfficerUnitWeeklyPlans(rows) {
         unitId: row.unitId,
         unitName: row.unitName,
         unitNumber: row.unitNumber,
-        weekStart: row.weekStart,
-        weekEnd: row.weekEnd,
         zones: [],
       });
-    }
-
-    if (!row.patrolId) {
-      continue;
     }
 
     const statusCode = getZoneStatusCode({
       observationReportId:
         row.observationReportId,
+      noObservations: row.noObservations,
       closureStatus: row.closureStatus,
     });
 
@@ -366,7 +375,12 @@ function buildOfficerUnitWeeklyPlans(rows) {
     });
   }
 
-  return [...unitsById.values()];
+  return {
+    weekStart: rows[0].weekStart,
+    weekEnd: rows[0].weekEnd,
+    totalAudits: rows.length,
+    units: [...unitsById.values()],
+  };
 }
 
 function parseDashboardPeriod(
@@ -482,12 +496,12 @@ export async function getDashboardData({
     ]);
 
     /*
-     * Unit-wise cards are an EHS Officer feature: every location has
-     * its own officer, so scoping by their plant is what makes "one
-     * card per unit they manage" meaningful. HOD/Plant Head/Admin keep
-     * the existing plant-wide nextWeek list below.
+     * The weekly plan card is an EHS Officer feature: every location
+     * has its own officer, so scoping by their plant is what makes a
+     * single "upcoming inspection week" meaningful. HOD/Plant Head/
+     * Admin keep the existing plant-wide nextWeek list below.
      */
-    let unitWeeks = null;
+    let officerWeek = null;
 
     if (dashboardRole === USER_ROLES.EHS_OFFICER) {
       const officerPlant =
@@ -495,17 +509,15 @@ export async function getDashboardData({
           .findOfficerPlant(user.id);
 
       if (officerPlant) {
-        const unitWeekRows =
+        const weekRows =
           await dashboardRepository
-            .findOfficerUnitWeeklyPlans({
+            .findOfficerWeekPatrols({
               plantId: officerPlant.id,
               weekStart,
             });
 
-        unitWeeks =
-          buildOfficerUnitWeeklyPlans(
-            unitWeekRows,
-          );
+        officerWeek =
+          buildOfficerWeek(weekRows);
       }
     }
 
@@ -531,7 +543,7 @@ export async function getDashboardData({
         weekEnd,
       ),
 
-      unitWeeks,
+      officerWeek,
     };
   }
 

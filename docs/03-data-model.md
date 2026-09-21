@@ -76,6 +76,8 @@ Indexes on `scheduled_date`, `(auditor_id, scheduled_date)`, `(auditee_id, sched
 
 **`observation_reports`** — one row per patrol (`patrol_id` is `UNIQUE`, `ON DELETE CASCADE`).
 
+Since migration 013 a report holds **1–10 observations** in `observation_items`, and the per-observation columns below (`observation_location`, `category`, `description`, `risk_category`, `photograph_*`, `zone_area_id`) are kept filled with **observation #1** so every pre-existing query keeps working. `no_observations` marks a report closed with "No observation to record": it has no items and no `closure_requests` row, and its patrol goes straight to `COMPLETED`.
+
 | Column | Notes |
 |---|---|
 | `submitted_by` | auditor (FK users) |
@@ -90,8 +92,26 @@ Indexes on `scheduled_date`, `(auditor_id, scheduled_date)`, `(auditee_id, sched
 | `photograph_path`, `photograph_original_name`, `photograph_mime_type`, `photograph_size` | file stored on disk under `backend/uploads/observations/<uuid>.<ext>`; only the path is in the DB |
 | `status` | `OPEN` \| `PENDING_AUDITEE_ACTION` \| `PENDING_EHS_APPROVAL` \| `REEXAMINATION_REQUIRED` \| `CLOSED` |
 | `submitted_at`, `updated_at`, `closed_at` | |
+| `no_observations` | boolean, default `FALSE`; `TRUE` for a "No observation to record" closure (migration 013) |
+
+**`observation_items`** (migration 013) — 1–10 per report, `UNIQUE (observation_report_id, sequence_number)`, `CHECK sequence_number BETWEEN 1 AND 10`, `ON DELETE CASCADE`.
+
+| Column | Notes |
+|---|---|
+| `observation_report_id` | FK `observation_reports` |
+| `sequence_number` | 1–10, the order the auditor entered them |
+| `zone_area_id` | FK `zone_areas`; validated against the patrol's own zone at submit time |
+| `observation_location` | area name copied at submit time |
+| `category` | `UA` \| `UC`, CHECK |
+| `description` | text, service limits to 500 words |
+| `risk_category` | `HIGH` \| `MEDIUM` \| `LOW`, CHECK |
+| `photograph_path`, `photograph_original_name`, `photograph_mime_type`, `photograph_size` | one photograph per observation, same upload directory |
+
+Index on `(observation_report_id, sequence_number)`. The migration backfills one item per pre-existing report from that report's own columns, so old reports render unchanged.
 
 **`closure_requests`** — one row per observation report (unique index on `observation_report_id`). Created automatically when the report is filed.
+
+Since migration 014 the action plan lives **per observation** in `closure_items`; the columns below keep mirroring **item #1** so every older reader still works, and `status` is derived from the items rather than set directly.
 
 | Column | Notes |
 |---|---|
@@ -105,6 +125,19 @@ Indexes on `scheduled_date`, `(auditor_id, scheduled_date)`, `(auditee_id, sched
 
 Note: the column default is still `'REQUESTED'`, which the CHECK constraint rejects. Inserts must always set `status` explicitly (the observation service does).
 
+
+**`departments`** (migration 016) — master data, plant-scoped, `UNIQUE (plant_id, code)`, loaded at cutover like the location hierarchy (R12). `users.department_id` puts an Action Team HOD in one department; `closure_items.department_id` and `action_tickets.department_id` record which department a plan and its ticket went to.
+
+**`closure_items`** (migration 014) — one per `observation_items` row, `UNIQUE (closure_request_id, sequence_number)` and `UNIQUE (observation_item_id)`, `ON DELETE CASCADE`.
+
+| Column | Notes |
+|---|---|
+| `closure_request_id` | FK `closure_requests` |
+| `observation_item_id` | FK `observation_items`; the observation this plan answers |
+| `sequence_number` | matches the observation's own sequence |
+| `action_plan`, `target_date`, `responsible_hod_name`, `action_hod_id`, `action_plan_saved_at` | this observation's plan and the department it is assigned to; all nullable until the auditee saves it |
+
+`action_tickets` also gains (migration 016) `department_id`, `submitted_for_approval_at`, `approved_by`/`approved_at`/`approval_comments`, and `reopen_comments`/`reopened_at`/`reopen_count`; its status CHECK now allows `PENDING_APPROVAL` (the EHS Officer's queue), whose state rule is `decision IS NOT NULL AND closure_date IS NULL`. `action_tickets.closure_item_id` (migration 014) points at the item, and the round uniqueness moved from `(closure_request_id, closure_round)` to `(closure_item_id, closure_round)`: one ticket per observation per round. Migration 015 recomputes every migrated closure's derived status once.
 ## Status values
 
 Three parallel status columns describe one workflow. Which code path moves each one is documented in [05-workflows.md](05-workflows.md).

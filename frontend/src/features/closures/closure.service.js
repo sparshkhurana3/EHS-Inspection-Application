@@ -22,31 +22,34 @@ export function fetchPendingApprovals() {
   );
 }
 
-export function fetchActionHodOptions(closureId) {
+export function fetchDepartmentOptions(closureId) {
   return apiRequest(
     `/closures/${encodeURIComponent(
       closureId,
-    )}/action-hods`,
+    )}/departments`,
     { method: "GET" },
   );
 }
 
-export function saveClosureActionPlan({
+export function saveClosureItem({
   closureId,
+  closureItemId,
   actionPlan,
   targetDate,
-  actionHodId,
+  departmentId,
 }) {
   return apiRequest(
     `/closures/${encodeURIComponent(
       closureId,
+    )}/items/${encodeURIComponent(
+      closureItemId,
     )}/action-plan`,
     {
       method: "PATCH",
       body: JSON.stringify({
         actionPlan,
         targetDate,
-        actionHodId,
+        departmentId: Number(departmentId),
       }),
     },
   );

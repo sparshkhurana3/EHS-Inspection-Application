@@ -21,6 +21,26 @@ export async function getWeeklyAssignments(
   }
 }
 
+export async function getObservationHistory(
+  req,
+  res,
+  next,
+) {
+  try {
+    const result =
+      await observationService
+        .getObservationHistory({
+          user: req.user,
+          filter:
+            req.query.filter ?? "all",
+        });
+
+    res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function getObservationReport(
   req,
   res,
@@ -57,20 +77,31 @@ export async function createObservation(
           findingDate:
             req.body.findingDate,
 
-          zoneAreaId:
-            req.body.zoneAreaId,
+          observations:
+            req.body.observations,
 
-          category:
-            req.body.category,
+          photographs:
+            req.files,
+        });
 
-          description:
-            req.body.description,
+    res.status(201).json(result);
+  } catch (error) {
+    next(error);
+  }
+}
 
-          riskCategory:
-            req.body.riskCategory,
-
-          photograph:
-            req.file,
+export async function recordNoObservation(
+  req,
+  res,
+  next,
+) {
+  try {
+    const result =
+      await observationService
+        .recordNoObservation({
+          userId: req.user.id,
+          patrolId:
+            req.body.patrolId,
         });
 
     res.status(201).json(result);
@@ -91,6 +122,44 @@ export async function getObservationPhotograph(
           userId: req.user.id,
           reportId:
             req.params.reportId,
+        });
+
+    res.type(photograph.mimeType);
+
+    res.setHeader(
+      "Content-Disposition",
+      `inline; filename="${path.basename(
+        photograph.originalName,
+      )}"`,
+    );
+
+    res.setHeader(
+      "Cache-Control",
+      "private, max-age=300",
+    );
+
+    res.sendFile(
+      photograph.absolutePath,
+    );
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getObservationItemPhotograph(
+  req,
+  res,
+  next,
+) {
+  try {
+    const photograph =
+      await observationService
+        .getObservationItemPhotograph({
+          userId: req.user.id,
+          reportId:
+            req.params.reportId,
+          itemId:
+            req.params.itemId,
         });
 
     res.type(photograph.mimeType);

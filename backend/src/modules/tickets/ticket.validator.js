@@ -1,7 +1,16 @@
 import {
   body,
   param,
+  query,
 } from "express-validator";
+
+const TICKET_HISTORY_FILTERS = [
+  "all",
+  "open",
+  "in_progress",
+  "pending_approval",
+  "closed",
+];
 
 export const ticketIdValidationRules = [
   param("ticketId")
@@ -91,10 +100,41 @@ export const rejectTicketValidationRules = [
     .toInt(),
 ];
 
-export const closeTicketValidationRules = [
+export const submitResolutionValidationRules = [
   ...ticketIdValidationRules,
 
-  body("completionNotes")
+  body("resolutionComments")
+    .trim()
+    .notEmpty()
+    .withMessage(
+      "Describe what was done before submitting the resolution.",
+    )
+    .bail()
+    .isLength({
+      min: 3,
+      max: 1000,
+    })
+    .withMessage(
+      "Resolution comments must contain between 3 and 1000 characters.",
+    ),
+
+  body("correctiveActionTypeId")
+    .optional({
+      nullable: true,
+    })
+    .isInt({
+      min: 1,
+    })
+    .withMessage(
+      "Corrective action type must be a positive integer.",
+    )
+    .toInt(),
+];
+
+export const ticketApprovalValidationRules = [
+  ...ticketIdValidationRules,
+
+  body("comments")
     .optional({
       nullable: true,
     })
@@ -103,6 +143,34 @@ export const closeTicketValidationRules = [
       max: 1000,
     })
     .withMessage(
-      "Completion notes cannot exceed 1000 characters.",
+      "Comments cannot exceed 1000 characters.",
+    ),
+];
+
+export const ticketReopenValidationRules = [
+  ...ticketIdValidationRules,
+
+  body("comments")
+    .trim()
+    .notEmpty()
+    .withMessage(
+      "Explain what the Action Team HOD needs to redo before reopening the ticket.",
+    )
+    .bail()
+    .isLength({
+      min: 3,
+      max: 1000,
+    })
+    .withMessage(
+      "Comments must contain between 3 and 1000 characters.",
+    ),
+];
+
+export const ticketHistoryValidationRules = [
+  query("filter")
+    .optional()
+    .isIn(TICKET_HISTORY_FILTERS)
+    .withMessage(
+      "Invalid ticket history filter.",
     ),
 ];

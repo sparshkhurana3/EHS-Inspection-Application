@@ -5,7 +5,7 @@ import { formatDate } from "../../lib/errorMessage.js";
 import EvidenceInput from "./EvidenceInput.jsx";
 
 import {
-  useCloseTicket,
+  useSubmitResolution,
   useTicketDecision,
   useTicketEvidence,
   useTicketLookups,
@@ -13,8 +13,9 @@ import {
 
 /**
  * The Action Team HOD's half of a ticket: decide (while OPEN), attach
- * evidence and close (while IN_PROGRESS), or a read-only summary once
- * CLOSED.
+ * evidence and send the resolution to the EHS Officer (while
+ * IN_PROGRESS), wait (while PENDING_APPROVAL), or a read-only summary
+ * once CLOSED.
  */
 export default function TicketActionPanel({
   ticket,
@@ -35,7 +36,7 @@ export default function TicketActionPanel({
     onChanged,
   );
 
-  const closeForm = useCloseTicket(
+  const resolution = useSubmitResolution(
     ticket,
     onChanged,
   );
@@ -71,7 +72,7 @@ export default function TicketActionPanel({
 
         <div className="form-field">
           <label htmlFor="ticket-corrective-type">
-            Type of corrective action
+            Type of work
           </label>
 
           <select
@@ -104,7 +105,8 @@ export default function TicketActionPanel({
 
           <span className="form-field-help">
             Required to accept; optional to
-            reject.
+            reject. You can change it when you
+            report the work done.
           </span>
         </div>
 
@@ -128,9 +130,15 @@ export default function TicketActionPanel({
           >
             {decision.submitting
               ? "Submitting..."
-              : "Reject and close"}
+              : "Reject and send for approval"}
           </button>
         </div>
+
+        <p className="closure-empty-note">
+          Your explanation goes to the EHS
+          Officer, who closes the ticket or
+          sends it back to you.
+        </p>
       </section>
     );
   }
@@ -211,50 +219,126 @@ export default function TicketActionPanel({
           </button>
         ) : null}
 
-        <div className="form-field">
-          <label htmlFor="completion-notes">
-            Completion notes (optional)
-          </label>
+        <div className="ticket-resolution-form">
+          <h4>Resolution</h4>
 
-          <textarea
-            id="completion-notes"
-            rows="4"
-            value={
-              closeForm.completionNotes
+          <div className="form-field">
+            <label htmlFor="resolution-comments">
+              What was done
+            </label>
+
+            <textarea
+              id="resolution-comments"
+              rows="4"
+              value={
+                resolution.resolutionComments
+              }
+              disabled={resolution.submitting}
+              onChange={(event) =>
+                resolution.setResolutionComments(
+                  event.target.value,
+                )
+              }
+            />
+          </div>
+
+          <div className="form-field">
+            <label htmlFor="resolution-type">
+              Type of work done
+            </label>
+
+            <select
+              id="resolution-type"
+              value={
+                resolution.correctiveActionTypeId
+              }
+              disabled={resolution.submitting}
+              onChange={(event) =>
+                resolution.setCorrectiveActionTypeId(
+                  event.target.value,
+                )
+              }
+            >
+              <option value="">
+                Select a type
+              </option>
+
+              {correctiveActionTypes.map(
+                (type) => (
+                  <option
+                    key={type.id}
+                    value={type.id}
+                  >
+                    {type.name}
+                  </option>
+                ),
+              )}
+            </select>
+          </div>
+
+          {resolution.error ? (
+            <Alert type="error">
+              {resolution.error}
+            </Alert>
+          ) : null}
+
+          <button
+            type="button"
+            className="button button-primary"
+            disabled={
+              resolution.submitting ||
+              !ticket.canSubmitResolution
             }
-            disabled={closeForm.closing}
-            onChange={(event) =>
-              closeForm.setCompletionNotes(
-                event.target.value,
-              )
+            title={
+              ticket.canSubmitResolution
+                ? undefined
+                : "Attach at least one evidence photograph first."
             }
-          />
+            onClick={resolution.submit}
+          >
+            {resolution.submitting
+              ? "Sending..."
+              : "Submit resolution for approval"}
+          </button>
+
+          <p className="closure-empty-note">
+            Attach 1–3 photographs and describe
+            what was done. The EHS Officer
+            closes the ticket or sends it back.
+          </p>
         </div>
+      </section>
+    );
+  }
 
-        {closeForm.error ? (
-          <Alert type="error">
-            {closeForm.error}
-          </Alert>
-        ) : null}
+  if (ticket.awaitingApproval) {
+    return (
+      <section className="ticket-action-panel">
+        <h3>Awaiting EHS Officer approval</h3>
 
-        <button
-          type="button"
-          className="button button-primary"
-          disabled={
-            closeForm.closing ||
-            !ticket.canClose
-          }
-          title={
-            ticket.canClose
-              ? undefined
-              : "Attach at least one evidence photograph first."
-          }
-          onClick={closeForm.close}
-        >
-          {closeForm.closing
-            ? "Closing..."
-            : "Close ticket"}
-        </button>
+        <p>
+          {ticket.pendingOutcome === "REJECTION"
+            ? "Your rejection of this plan is with the EHS Officer."
+            : "Your resolution is with the EHS Officer."}{" "}
+          Sent{" "}
+          {formatDate(
+            ticket.submittedForApprovalAt,
+          )}
+          .
+        </p>
+
+        {ticket.pendingOutcome ===
+        "REJECTION" ? (
+          <div className="observation-detail-body">
+            <span>Your explanation</span>
+            <p>{ticket.comments}</p>
+          </div>
+        ) : (
+          <div className="observation-detail-body">
+            <span>What you reported</span>
+            <p>{ticket.resolutionComments}</p>
+          </div>
+        )}
       </section>
     );
   }
@@ -265,8 +349,19 @@ export default function TicketActionPanel({
 
       <p>
         {ticket.displayDecision} on{" "}
-        {formatDate(ticket.closureDate)}.
+        {formatDate(ticket.closureDate)}
+        {ticket.approvedByName
+          ? `, approved by ${ticket.approvedByName}`
+          : ""}
+        .
       </p>
+
+      {ticket.approvalComments ? (
+        <div className="observation-detail-body">
+          <span>EHS Officer's comments</span>
+          <p>{ticket.approvalComments}</p>
+        </div>
+      ) : null}
     </section>
   );
 }

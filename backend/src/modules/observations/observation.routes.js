@@ -13,18 +13,24 @@ import {
 import {
   createObservation,
   getWeeklyAssignments,
+  getObservationHistory,
   getObservationReport,
   getObservationPhotograph,
+  getObservationItemPhotograph,
+  recordNoObservation,
 } from "./observation.controller.js";
 
 import {
   createObservationValidationRules,
+  historyValidationRules,
+  noObservationValidationRules,
+  observationItemIdValidationRules,
   observationReportIdValidationRules,
 } from "./observation.validator.js";
 
 import {
   handleObservationUploadError,
-  uploadObservationPhotograph,
+  uploadObservationPhotographs,
 } from "./observationUpload.js";
 
 const router = Router();
@@ -36,9 +42,25 @@ router.get(
 );
 
 /*
- * Registered before the parameterised routes below so the literal path
- * is matched first.
+ * Literal paths registered before the parameterised routes below so
+ * "history" and "no-observation" are never parsed as a report id.
  */
+router.get(
+  "/history",
+  authenticate,
+  historyValidationRules,
+  validate,
+  getObservationHistory,
+);
+
+router.post(
+  "/no-observation",
+  authenticate,
+  noObservationValidationRules,
+  validate,
+  recordNoObservation,
+);
+
 router.get(
   "/:reportId",
   authenticate,
@@ -55,10 +77,18 @@ router.get(
   getObservationPhotograph,
 );
 
+router.get(
+  "/:reportId/items/:itemId/photograph",
+  authenticate,
+  observationItemIdValidationRules,
+  validate,
+  getObservationItemPhotograph,
+);
+
 router.post(
   "/",
   authenticate,
-  uploadObservationPhotograph,
+  uploadObservationPhotographs,
   handleObservationUploadError,
   createObservationValidationRules,
   validate,

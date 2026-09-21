@@ -4,10 +4,13 @@ import LoadingSpinner from "../../components/LoadingSpinner.jsx";
 import { formatDate } from "../../lib/errorMessage.js";
 
 import PatrolForm from "./PatrolForm.jsx";
+import RosterUploadPanel from "./RosterUploadPanel.jsx";
 import usePatrols from "./usePatrols.js";
+import useRoster from "./useRoster.js";
 
 export default function PlanningPage() {
   const planning = usePatrols();
+  const roster = useRoster();
 
   if (planning.loading) {
     return (
@@ -42,6 +45,40 @@ export default function PlanningPage() {
           <h1>Plan audits</h1>
 
           <p>{planning.location.name}</p>
+        </div>
+      </header>
+
+      <RosterUploadPanel
+        roster={roster.roster}
+        loading={roster.loading}
+        uploading={roster.uploading}
+        selectedFile={roster.selectedFile}
+        error={roster.error}
+        rowErrors={roster.rowErrors}
+        summary={roster.summary}
+        onSelectFile={roster.selectFile}
+        onUpload={roster.upload}
+        onDownloadTemplate={() =>
+          roster.downloadTemplate(
+            planning.zones,
+            planning.units,
+            planning.location,
+          )
+        }
+      />
+
+      <header className="observation-section-header">
+        <div>
+          <span className="dashboard-eyebrow">
+            Exception
+          </span>
+
+          <h2>Schedule a single audit</h2>
+
+          <p>
+            For a one-off audit outside the
+            weekly roster.
+          </p>
         </div>
 
         <div className="closure-header-actions">

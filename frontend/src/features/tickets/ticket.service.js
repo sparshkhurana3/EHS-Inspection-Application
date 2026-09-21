@@ -95,19 +95,74 @@ export function deleteTicketEvidence({
   );
 }
 
-export function closeTicket({
+export function submitTicketResolution({
   ticketId,
-  completionNotes,
+  resolutionComments,
+  correctiveActionTypeId,
 }) {
   return apiRequest(
     `/tickets/${encodeURIComponent(
       ticketId,
-    )}/close`,
+    )}/submit-resolution`,
     {
       method: "POST",
       body: JSON.stringify({
-        completionNotes,
+        resolutionComments,
+        correctiveActionTypeId:
+          correctiveActionTypeId
+            ? Number(correctiveActionTypeId)
+            : undefined,
       }),
+    },
+  );
+}
+
+export function fetchTicketHistory(
+  filter = "all",
+) {
+  const query = new URLSearchParams({
+    filter,
+  });
+
+  return apiRequest(
+    `/tickets/history?${query.toString()}`,
+    { method: "GET" },
+  );
+}
+
+export function fetchPendingTicketApprovals() {
+  return apiRequest(
+    "/tickets/pending-approvals",
+    { method: "GET" },
+  );
+}
+
+export function approveTicket({
+  ticketId,
+  comments,
+}) {
+  return apiRequest(
+    `/tickets/${encodeURIComponent(
+      ticketId,
+    )}/approve`,
+    {
+      method: "POST",
+      body: JSON.stringify({ comments }),
+    },
+  );
+}
+
+export function reopenTicket({
+  ticketId,
+  comments,
+}) {
+  return apiRequest(
+    `/tickets/${encodeURIComponent(
+      ticketId,
+    )}/reopen`,
+    {
+      method: "POST",
+      body: JSON.stringify({ comments }),
     },
   );
 }

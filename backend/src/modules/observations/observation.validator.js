@@ -1,6 +1,7 @@
 import {
   body,
   param,
+  query,
 } from "express-validator";
 
 const ALLOWED_CATEGORIES = [
@@ -12,6 +13,16 @@ const ALLOWED_RISK_CATEGORIES = [
   "HIGH",
   "MEDIUM",
   "LOW",
+];
+
+const MAX_OBSERVATIONS_PER_REPORT = 10;
+const MAX_DESCRIPTION_WORDS = 500;
+
+const ALLOWED_HISTORY_FILTERS = [
+  "all",
+  "closed",
+  "no_observations",
+  "in_progress",
 ];
 
 function countWords(value) {
@@ -28,6 +39,95 @@ function countWords(value) {
     .length;
 }
 
+/*
+ * Validates and normalises one observation item from the parsed
+ * `observations` array. Throws with the message prefixed by the
+ * observation's 1-based position, so a bad item in a multi-observation
+ * submission is identifiable.
+ */
+function normalizeObservationItem(
+  item,
+  index,
+) {
+  const label = `Observation ${index + 1}:`;
+
+  if (!item || typeof item !== "object") {
+    throw new Error(
+      `${label} invalid observation data.`,
+    );
+  }
+
+  const zoneAreaId = Number.parseInt(
+    item.zoneAreaId,
+    10,
+  );
+
+  if (
+    !Number.isInteger(zoneAreaId) ||
+    zoneAreaId < 1
+  ) {
+    throw new Error(
+      `${label} select the area where the observation was made.`,
+    );
+  }
+
+  const category = String(
+    item.category ?? "",
+  )
+    .trim()
+    .toUpperCase();
+
+  if (
+    !ALLOWED_CATEGORIES.includes(category)
+  ) {
+    throw new Error(
+      `${label} select UA or UC as the observation category.`,
+    );
+  }
+
+  const description = String(
+    item.description ?? "",
+  ).trim();
+
+  if (!description) {
+    throw new Error(
+      `${label} enter the observation description.`,
+    );
+  }
+
+  if (
+    countWords(description) >
+    MAX_DESCRIPTION_WORDS
+  ) {
+    throw new Error(
+      `${label} description cannot exceed ${MAX_DESCRIPTION_WORDS} words.`,
+    );
+  }
+
+  const riskCategory = String(
+    item.riskCategory ?? "",
+  )
+    .trim()
+    .toUpperCase();
+
+  if (
+    !ALLOWED_RISK_CATEGORIES.includes(
+      riskCategory,
+    )
+  ) {
+    throw new Error(
+      `${label} select a valid risk category.`,
+    );
+  }
+
+  return {
+    zoneAreaId,
+    category,
+    description,
+    riskCategory,
+  };
+}
+
 export const observationReportIdValidationRules = [
   param("reportId")
     .isInt({
@@ -35,6 +135,42 @@ export const observationReportIdValidationRules = [
     })
     .withMessage(
       "Observation report ID must be a positive integer.",
+    )
+    .toInt(),
+];
+
+export const observationItemIdValidationRules = [
+  ...observationReportIdValidationRules,
+
+  param("itemId")
+    .isInt({ min: 1 })
+    .withMessage(
+      "Observation item ID must be a positive integer.",
+    )
+    .toInt(),
+];
+
+export const historyValidationRules = [
+  query("filter")
+    .optional()
+    .isIn(ALLOWED_HISTORY_FILTERS)
+    .withMessage(
+      "Invalid history filter.",
+    ),
+];
+
+export const noObservationValidationRules = [
+  body("patrolId")
+    .notEmpty()
+    .withMessage(
+      "Patrol ID is required.",
+    )
+    .bail()
+    .isInt({
+      min: 1,
+    })
+    .withMessage(
+      "Patrol ID must be a positive integer.",
     )
     .toInt(),
 ];
@@ -69,65 +205,59 @@ export const createObservationValidationRules = [
     .toDate(),
 
   /*
-   * A patrol covers the whole zone, so the auditor names the area the
-   * finding was in. The service checks it belongs to this patrol's zone;
-   * the plant location is derived from the patrol, never submitted.
+   * `observations` is a JSON-encoded array (1-10 items) submitted as a
+   * multipart text field alongside the `photographs` files, which
+   * multer keeps in the same order (docs/15-observations-refinement-
+   * plan.md, D11). Each item names the area the auditor found it in;
+   * the service checks it belongs to this patrol's zone.
    */
-  body("zoneAreaId")
+  body("observations")
     .notEmpty()
     .withMessage(
-      "Select the area where the observation was made.",
+      "Add at least one observation.",
     )
     .bail()
-    .isInt({ min: 1 })
-    .withMessage(
-      "Area must be a positive integer.",
-    )
-    .toInt(),
+    .customSanitizer((value) => {
+      if (Array.isArray(value)) {
+        return value;
+      }
 
-  body("category")
-    .trim()
-    .notEmpty()
-    .withMessage(
-      "Observation category is required.",
-    )
-    .bail()
-    .toUpperCase()
-    .isIn(ALLOWED_CATEGORIES)
-    .withMessage(
-      "Observation category must be UA or UC.",
-    ),
-
-  body("description")
-    .trim()
-    .notEmpty()
-    .withMessage(
-      "Observation description is required.",
-    )
-    .bail()
-    .custom((description) => {
-      const wordCount =
-        countWords(description);
-
-      if (wordCount > 500) {
+      try {
+        return JSON.parse(value);
+      } catch {
+        return null;
+      }
+    })
+    .custom((items) => {
+      if (
+        !Array.isArray(items) ||
+        items.length === 0
+      ) {
         throw new Error(
-          "Observation description cannot exceed 500 words.",
+          "Add at least one observation.",
         );
       }
 
-      return true;
-    }),
+      if (
+        items.length >
+        MAX_OBSERVATIONS_PER_REPORT
+      ) {
+        throw new Error(
+          `Up to ${MAX_OBSERVATIONS_PER_REPORT} observations per report.`,
+        );
+      }
 
-  body("riskCategory")
-    .trim()
-    .notEmpty()
-    .withMessage(
-      "Risk category is required.",
-    )
-    .bail()
-    .toUpperCase()
-    .isIn(ALLOWED_RISK_CATEGORIES)
-    .withMessage(
-      "Risk category must be High, Medium, or Low.",
+      items.forEach(
+        normalizeObservationItem,
+      );
+
+      return true;
+    })
+    .customSanitizer((items) =>
+      Array.isArray(items)
+        ? items.map(
+            normalizeObservationItem,
+          )
+        : items,
     ),
 ];

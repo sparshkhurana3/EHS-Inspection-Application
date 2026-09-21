@@ -15,27 +15,35 @@ import {
 } from "../../middleware/validate.js";
 
 import {
+  MANAGEMENT_ROLES,
   TICKET_ROLES,
 } from "../../shared/constants/roles.js";
 
 import {
   acceptTicket,
   addEvidence,
-  closeTicket,
+  approveTicket,
+  getHodTicketHistory,
   getHodTickets,
+  getPendingTicketApprovals,
   getTicketById,
   getTicketEvidence,
   getTicketLookups,
   rejectTicket,
   removeEvidence,
+  reopenTicket,
+  submitResolution,
 } from "./ticket.controller.js";
 
 import {
   acceptTicketValidationRules,
-  closeTicketValidationRules,
   evidenceIdValidationRules,
   rejectTicketValidationRules,
+  submitResolutionValidationRules,
+  ticketApprovalValidationRules,
+  ticketHistoryValidationRules,
   ticketIdValidationRules,
+  ticketReopenValidationRules,
 } from "./ticket.validator.js";
 
 import {
@@ -46,8 +54,8 @@ import {
 const router = Router();
 
 /*
- * The Action Team HOD's own list: open, in progress, and closed in the
- * last 30 days.
+ * The Action Team HOD's own list: open, in progress, waiting on the EHS
+ * Officer, and closed in the last 30 days.
  */
 router.get(
   "/",
@@ -57,7 +65,8 @@ router.get(
 );
 
 /*
- * Registered before "/:ticketId" so the literal path is matched first.
+ * Literal paths registered before "/:ticketId" so they are matched
+ * first.
  */
 router.get(
   "/lookups",
@@ -66,9 +75,34 @@ router.get(
 );
 
 /*
+ * The HOD's six-month history, any status.
+ */
+router.get(
+  "/history",
+  authenticate,
+  authorize(...TICKET_ROLES),
+  ticketHistoryValidationRules,
+  validate,
+  getHodTicketHistory,
+);
+
+/*
+ * The EHS Officer's ticket review queue. Deliberately not on the Ticket
+ * page, which stays Action Team HOD only
+ * (docs/17-ticket-refinement-plan.md, D7).
+ */
+router.get(
+  "/pending-approvals",
+  authenticate,
+  authorize(...MANAGEMENT_ROLES),
+  getPendingTicketApprovals,
+);
+
+/*
  * Readable by the assigned HOD, the auditee who assigned it, the
- * auditor, and the patrol's EHS Officer; enforced in the repository's
- * WHERE clause rather than by role, so no authorize() here.
+ * auditor, the patrol's EHS Officer, and management at that plant;
+ * enforced in the repository's WHERE clause rather than by role, so no
+ * authorize() here.
  */
 router.get(
   "/:ticketId",
@@ -128,13 +162,35 @@ router.delete(
   removeEvidence,
 );
 
+/*
+ * The HOD sends the completed work to the EHS Officer; the officer is
+ * the one who closes the ticket.
+ */
 router.post(
-  "/:ticketId/close",
+  "/:ticketId/submit-resolution",
   authenticate,
   authorize(...TICKET_ROLES),
-  closeTicketValidationRules,
+  submitResolutionValidationRules,
   validate,
-  closeTicket,
+  submitResolution,
+);
+
+router.post(
+  "/:ticketId/approve",
+  authenticate,
+  authorize(...MANAGEMENT_ROLES),
+  ticketApprovalValidationRules,
+  validate,
+  approveTicket,
+);
+
+router.post(
+  "/:ticketId/reopen",
+  authenticate,
+  authorize(...MANAGEMENT_ROLES),
+  ticketReopenValidationRules,
+  validate,
+  reopenTicket,
 );
 
 export default router;

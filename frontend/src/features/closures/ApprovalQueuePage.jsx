@@ -6,7 +6,7 @@ import LoadingSpinner from "../../components/LoadingSpinner.jsx";
 import ApprovalPanel from "./ApprovalPanel.jsx";
 import ObservationSummary from "./ObservationSummary.jsx";
 
-import TicketStatusCard from "../tickets/TicketStatusCard.jsx";
+import ClosureItemSummary from "./ClosureItemSummary.jsx";
 
 import { formatDate } from "../../lib/errorMessage.js";
 
@@ -43,8 +43,11 @@ export default function ApprovalQueuePage() {
    * closure for whichever row is selected is what carries the embedded
    * ticket (with evidence) into this page.
    */
-  const { closure: selectedDetail } =
-    useClosureDetail(selectedId);
+  const {
+    closure: selectedDetail,
+    photograph: selectedPhotograph,
+    photographs: selectedPhotographs,
+  } = useClosureDetail(selectedId);
 
   if (loading) {
     return (
@@ -135,8 +138,9 @@ export default function ApprovalQueuePage() {
       {selected ? (
         <>
           <ObservationSummary
-            closure={selected}
-            photograph=""
+            closure={selectedDetail ?? selected}
+            photograph={selectedPhotograph}
+            photographs={selectedPhotographs}
           />
 
           <ApprovalPanel
@@ -152,9 +156,17 @@ export default function ApprovalQueuePage() {
             }}
           />
 
-          <TicketStatusCard
-            ticket={selectedDetail?.ticket}
-          />
+          {(selectedDetail?.items ?? []).map(
+            (item) => (
+              <ClosureItemSummary
+                key={item.id}
+                item={item}
+                total={
+                  selectedDetail.items.length
+                }
+              />
+            ),
+          )}
         </>
       ) : null}
     </section>

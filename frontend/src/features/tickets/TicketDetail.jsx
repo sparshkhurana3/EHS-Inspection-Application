@@ -15,11 +15,13 @@ import { useTicketDetail } from "./useTickets.js";
  */
 export default function TicketDetail({
   ticketId,
+  backLabel = "Back",
   onBack,
 }) {
   const {
     ticket,
     photograph,
+    photographs,
     evidenceUrls,
     loading,
     error,
@@ -70,6 +72,7 @@ export default function TicketDetail({
     auditorName: ticket.auditorName,
     observationDescription:
       ticket.observationDescription,
+    observations: ticket.observations,
   };
 
   return (
@@ -90,13 +93,27 @@ export default function TicketDetail({
           className="button button-secondary"
           onClick={onBack}
         >
-          Back
+          {backLabel}
         </button>
       </header>
+
+      {ticket.wasReopened ? (
+        <Alert
+          type="warning"
+          title={`Reopened by the EHS Officer${
+            ticket.reopenCount > 1
+              ? ` (${ticket.reopenCount} times)`
+              : ""
+          }`}
+        >
+          {ticket.reopenComments}
+        </Alert>
+      ) : null}
 
       <ObservationSummary
         closure={observation}
         photograph={photograph}
+        photographs={photographs}
       />
 
       <section className="closure-action-plan">

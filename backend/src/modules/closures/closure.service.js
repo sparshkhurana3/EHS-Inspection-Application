@@ -11,6 +11,11 @@ import * as closureRepository
 import * as ticketService
   from "../tickets/ticket.service.js";
 
+import {
+  isReadyForSubmission,
+  recomputeClosureStatus,
+} from "./closureStatus.js";
+
 const MAX_ACTION_PLAN_WORDS = 255;
 
 const EDITABLE_CLOSURE_STATUSES =
@@ -60,14 +65,15 @@ function getCurrentLocalDate() {
 }
 
 /*
- * Before completion the auditee sees only two labels: a closure waiting
- * on the EHS Officer reads "Pending Approval", anything else reads
- * "Open".
+ * The three states the closure report has (docs/16-closure-refinement-
+ * plan.md): Open while any observation still needs a plan or a
+ * department has not taken its ticket up, In Progress once every
+ * observation is with a department, Closed once the EHS Officer has
+ * approved it.
  *
- * Only the label collapses. IN_PROGRESS and REEXAMINATION_REQUIRED stay
- * distinct in the database because they drive different behaviour:
- * whether submit is enabled, and whether this is a first attempt or a
- * rework. Merging them would break the approval loop.
+ * REEXAMINATION_REQUIRED reads "Open" — the plan has to be redone — and
+ * stays distinct in the database because `wasReturned` shows the
+ * officer's reason and the approval loop depends on it.
  */
 function getDisplayStatus(status) {
   const normalizedStatus =
@@ -86,7 +92,11 @@ function getDisplayStatus(status) {
     normalizedStatus === "APPROVED" ||
     normalizedStatus === "CLOSED"
   ) {
-    return "Completed";
+    return "Closed";
+  }
+
+  if (normalizedStatus === "IN_PROGRESS") {
+    return "In Progress";
   }
 
   return "Open";
@@ -103,6 +113,48 @@ const TICKET_STATUS_LABELS = {
   CLOSED: "Closed",
 };
 
+/*
+ * An observation's plan stays editable while the closure itself is
+ * editable and no department has acted on that observation yet: once a
+ * ticket is accepted or rejected, its snapshot is what the decision
+ * refers to, so the text is frozen (docs/16, D8).
+ */
+function canEditClosureItem(
+  item,
+  closureStatus,
+  approvalIteration = 0,
+) {
+  if (
+    !EDITABLE_CLOSURE_STATUSES.has(
+      normalizeStatus(closureStatus),
+    )
+  ) {
+    return false;
+  }
+
+  if (!item.ticket) {
+    return true;
+  }
+
+  /*
+   * A ticket from an earlier round is history: when the EHS Officer
+   * sends a closure back, the round advances and every observation is
+   * open for rework again, with a fresh ticket raised on the next save
+   * (docs/16, D7).
+   */
+  if (
+    Number(item.ticket.closureRound ?? 0) <
+    Number(approvalIteration ?? 0)
+  ) {
+    return true;
+  }
+
+  return (
+    normalizeStatus(item.ticket.status) ===
+    "OPEN"
+  );
+}
+
 function createClosureResponse(closure) {
   if (!closure) {
     return null;
@@ -110,6 +162,45 @@ function createClosureResponse(closure) {
 
   const normalizedStatus =
     normalizeStatus(closure.status);
+
+  const items = (closure.items ?? []).map(
+    (item) => ({
+      ...item,
+
+      canEdit: canEditClosureItem(
+        item,
+        normalizedStatus,
+        closure.approvalIteration,
+      ),
+
+      ticketDisplayStatus: item.ticket
+        ? (TICKET_STATUS_LABELS[
+            item.ticket.status
+          ] ?? item.ticket.status)
+        : null,
+    }),
+  );
+
+  const everyItemPlanned =
+    items.length > 0 &&
+    items.every((item) =>
+      String(item.actionPlan ?? "").trim(),
+    );
+
+  const everyTicketClosed =
+    items.length > 0 &&
+    items.every(
+      (item) =>
+        normalizeStatus(
+          item.ticket?.status,
+        ) === "CLOSED",
+    );
+
+  const closedTicketCount = items.filter(
+    (item) =>
+      normalizeStatus(item.ticket?.status) ===
+      "CLOSED",
+  ).length;
 
   const hasCompleteActionPlan =
     Boolean(
@@ -140,10 +231,21 @@ function createClosureResponse(closure) {
         normalizedStatus,
       ),
 
+    items,
+
+    /*
+     * A closure may be sent for approval only once every observation
+     * has a plan and every department has resolved its ticket
+     * (docs/16, D6).
+     */
     canSubmitForClosure:
       normalizedStatus ===
         "IN_PROGRESS" &&
-      hasCompleteActionPlan,
+      everyItemPlanned &&
+      everyTicketClosed,
+
+    itemCount: items.length,
+    closedTicketCount,
 
     /*
      * A returned closure reads "Open", exactly like one never touched,
@@ -515,18 +617,30 @@ export async function rejectClosure(input) {
  * is a normal 200; the frontend explains it rather than treating it as
  * an error.
  */
-export async function getActionHodOptions({
+/**
+ * The departments the auditee may assign an observation to: those at
+ * this closure's plant with an Action Team HOD registered.
+ */
+export async function getDepartmentOptions({
   userId,
   closureId,
 }) {
-  const existingClosure =
-    await closureRepository
-      .findClosureByIdForAuditee({
-        closureId,
-        auditeeId: userId,
-      });
+  const [plantName, departments] =
+    await Promise.all([
+      closureRepository
+        .findPlantNameForClosure({
+          closureId,
+          auditeeId: userId,
+        }),
 
-  if (!existingClosure) {
+      closureRepository
+        .findDepartmentsForClosure({
+          closureId,
+          auditeeId: userId,
+        }),
+    ]);
+
+  if (plantName === null) {
     throw new AppError(
       "The closure assignment was not found or is not assigned to the authenticated auditee.",
       404,
@@ -534,33 +648,36 @@ export async function getActionHodOptions({
     );
   }
 
-  const [actionHods, plantName] =
-    await Promise.all([
-      closureRepository
-        .findActionHodsForClosure({
-          closureId,
-          auditeeId: userId,
-        }),
-
-      closureRepository
-        .findPlantNameForClosure({
-          closureId,
-          auditeeId: userId,
-        }),
-    ]);
-
   return {
-    actionHods,
     plantName,
+
+    departments: departments.map(
+      (department) => ({
+        id: department.id,
+        name: department.name,
+        code: department.code,
+        hodId: department.hodId,
+        hodName: department.hodName,
+      }),
+    ),
   };
 }
 
-export async function saveActionPlan({
+/**
+ * Saves one observation's action plan and assigns it to a department.
+ *
+ * Each observation is an independent unit: saving one opens (or, while
+ * still OPEN, refreshes) that observation's own ticket, and the
+ * closure's status is then re-derived from every observation and its
+ * ticket (docs/16-closure-refinement-plan.md).
+ */
+export async function saveClosureItem({
   userId,
   closureId,
+  closureItemId,
   actionPlan,
   targetDate,
-  actionHodId,
+  departmentId,
 }) {
   if (!userId) {
     throw new AppError(
@@ -611,29 +728,30 @@ export async function saveActionPlan({
   }
 
   /*
-   * The Action Team HOD is chosen from a dropdown scoped to this
-   * closure's plant, never typed. The name stored on the closure is
-   * derived from the chosen user, never accepted from the client.
+   * The department is chosen from a dropdown scoped to this closure's
+   * plant, and the ticket goes to that department's Action Team HOD.
+   * Both the department and the HOD are resolved server-side, never
+   * accepted from the client.
    */
-  const actionHodOptions =
+  const departmentOptions =
     await closureRepository
-      .findActionHodsForClosure({
+      .findDepartmentsForClosure({
         closureId,
         auditeeId: userId,
       });
 
-  const selectedActionHod =
-    actionHodOptions.find(
-      (hod) =>
-        Number(hod.id) ===
-        Number(actionHodId),
+  const selectedDepartment =
+    departmentOptions.find(
+      (department) =>
+        Number(department.id) ===
+        Number(departmentId),
     );
 
-  if (!selectedActionHod) {
+  if (!selectedDepartment) {
     throw new AppError(
-      "Select an Action Team HOD registered at this location.",
+      "Select a department with an Action Team HOD registered at this location.",
       400,
-      "INVALID_ACTION_HOD",
+      "INVALID_DEPARTMENT",
     );
   }
 
@@ -645,105 +763,169 @@ export async function saveActionPlan({
       normalizedTargetDate,
 
     responsibleHodName:
-      selectedActionHod.fullName,
+      selectedDepartment.hodName,
   });
 
-  const savedClosure =
-    await withTransaction(
-      async (client) => {
-        const saved =
-          await closureRepository
-            .saveActionPlan(
-              {
-                closureId,
-                auditeeId: userId,
-
-                actionPlan:
-                  normalizedActionPlan,
-
-                targetDate:
-                  normalizedTargetDate,
-
-                responsibleHodName:
-                  selectedActionHod.fullName,
-
-                actionHodId:
-                  selectedActionHod.id,
-              },
-              client,
-            );
-
-        if (!saved) {
-          throw new AppError(
-            "The closure action plan could not be saved. Confirm that the report is assigned to the authenticated auditee and is still editable.",
-            409,
-            "ACTION_PLAN_SAVE_FAILED",
-          );
-        }
-
-        /*
-         * Open (or, while still OPEN, refresh) the ticket for this
-         * closure's current approval round. Failing to open a ticket
-         * must not save a plan with nobody assigned to act on it, so
-         * this runs in the same transaction as the save above.
-         */
+  await withTransaction(
+    async (client) => {
+      /*
+       * Two observations of the same closure can be saved at once, and
+       * each save re-derives the closure's status from all of them, so
+       * the parent row is locked for the length of the write.
+       */
+      const lockedClosure =
         await closureRepository
-          .upsertTicketForClosureRound(
+          .lockClosureForUpdate(
             {
               closureId,
+              auditeeId: userId,
+            },
+            client,
+          );
 
-              observationReportId:
-                saved.observation_report_id,
+      if (!lockedClosure) {
+        throw new AppError(
+          "The closure assignment was not found or is not assigned to the authenticated auditee.",
+          404,
+          "CLOSURE_ASSIGNMENT_NOT_FOUND",
+        );
+      }
 
-              patrolId: saved.patrol_id,
+      const items =
+        await closureRepository
+          .findClosureItems(
+            closureId,
+            client,
+          );
 
-              closureRound:
-                saved.approval_iteration,
+      const item = items.find(
+        (entry) =>
+          Number(entry.id) ===
+          Number(closureItemId),
+      );
 
-              actionHodId:
-                selectedActionHod.id,
+      if (!item) {
+        throw new AppError(
+          "That observation is not part of this closure.",
+          404,
+          "CLOSURE_ITEM_NOT_FOUND",
+        );
+      }
 
-              actionHodName:
-                selectedActionHod.fullName,
+      if (
+        !canEditClosureItem(
+          item,
+          lockedClosure.status,
+          lockedClosure.approvalIteration,
+        )
+      ) {
+        throw new AppError(
+          "A decision has already been recorded for this observation, so its action plan can no longer be changed.",
+          409,
+          "CLOSURE_ITEM_LOCKED",
+        );
+      }
 
-              proposedActionPlan:
+      const saved =
+        await closureRepository
+          .saveClosureItem(
+            {
+              closureId,
+              closureItemId,
+
+              actionPlan:
                 normalizedActionPlan,
 
               targetDate:
                 normalizedTargetDate,
 
-              assignedBy: userId,
+              responsibleHodName:
+                selectedDepartment.hodName,
+
+              actionHodId:
+                selectedDepartment.hodId,
+
+              departmentId:
+                selectedDepartment.id,
             },
             client,
           );
 
-        return saved;
-      },
-    );
+      if (!saved) {
+        throw new AppError(
+          "The action plan could not be saved. Confirm that the observation belongs to this closure and is still editable.",
+          409,
+          "ACTION_PLAN_SAVE_FAILED",
+        );
+      }
 
-  const updatedClosure =
-    await closureRepository
-      .findClosureByIdForAuditee({
+      /* Item #1 mirrors onto the closure's own columns (D2). */
+      await closureRepository
+        .syncClosureHeaderFromItemOne(
+          closureId,
+          client,
+        );
+
+      /*
+       * Open (or, while still OPEN, refresh) this observation's ticket
+       * for the closure's current approval round. Failing to open one
+       * must not leave a plan with nobody assigned to act on it, so it
+       * runs in the same transaction as the save.
+       */
+      await closureRepository
+        .upsertTicketForClosureRound(
+          {
+            closureId,
+            closureItemId,
+
+            observationReportId:
+              lockedClosure
+                .observationReportId,
+
+            patrolId:
+              lockedClosure.patrolId,
+
+            closureRound:
+              lockedClosure
+                .approvalIteration,
+
+            actionHodId:
+              selectedDepartment.hodId,
+
+            actionHodName:
+              selectedDepartment.hodName,
+
+            departmentId:
+              selectedDepartment.id,
+
+            proposedActionPlan:
+              normalizedActionPlan,
+
+            targetDate:
+              normalizedTargetDate,
+
+            assignedBy: userId,
+          },
+          client,
+        );
+
+      await recomputeClosureStatus(
         closureId,
-        auditeeId: userId,
-      });
+        client,
+      );
+    },
+  );
 
-  if (!updatedClosure) {
-    throw new AppError(
-      "The saved closure report could not be retrieved.",
-      500,
-      "SAVED_CLOSURE_NOT_FOUND",
-    );
-  }
+  const refreshed = await getClosureById({
+    userId,
+    closureId,
+  });
 
   return {
     message:
       "Action plan saved successfully.",
 
-    closure:
-      createClosureResponse(
-        updatedClosure,
-      ),
+    closure: refreshed.closure,
   };
 }
 
@@ -789,29 +971,36 @@ export async function submitClosure({
     );
   }
 
-  const hasCompleteActionPlan =
-    Boolean(
-      String(
-        existingClosure.actionPlan ??
-          "",
-      ).trim(),
-    ) &&
-    Boolean(
-      existingClosure.targetDate,
-    ) &&
-    Boolean(
-      String(
-        existingClosure
-          .responsibleHodName ??
-          "",
-      ).trim(),
-    );
+  /*
+   * Every observation needs a plan, and every department needs to have
+   * resolved its ticket (implemented or rejected), before the closure
+   * can go to the EHS Officer (docs/16, D6).
+   */
+  const items =
+    await closureRepository
+      .findClosureItems(closureId);
 
-  if (!hasCompleteActionPlan) {
+  if (
+    items.length === 0 ||
+    items.some(
+      (item) =>
+        !String(
+          item.actionPlan ?? "",
+        ).trim(),
+    )
+  ) {
     throw new AppError(
-      "Complete and save the action plan, target date, and responsible HOD name before submission.",
+      "Every observation needs a saved action plan before this closure can be submitted.",
       400,
       "INCOMPLETE_CLOSURE_REPORT",
+    );
+  }
+
+  if (!isReadyForSubmission(items)) {
+    throw new AppError(
+      "Every observation's ticket must be accepted or rejected and closed before this closure can be submitted.",
+      400,
+      "CLOSURE_TICKETS_OPEN",
     );
   }
 

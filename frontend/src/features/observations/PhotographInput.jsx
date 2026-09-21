@@ -6,6 +6,7 @@ export default function PhotographInput({
   photograph,
   photographPreview,
   disabled = false,
+  inputId = "observation-photograph",
   onChange,
   onRemove,
 }) {
@@ -62,7 +63,7 @@ export default function PhotographInput({
 
   return (
     <div className="observation-form-field">
-      <label htmlFor="observation-photograph">
+      <label htmlFor={inputId}>
         Observation photograph
 
         <span
@@ -128,7 +129,7 @@ export default function PhotographInput({
 
       <input
         ref={inputRef}
-        id="observation-photograph"
+        id={inputId}
         className="visually-hidden"
         type="file"
         accept=".jpg,.jpeg,.png,.svg,image/jpeg,image/png,image/svg+xml"

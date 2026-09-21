@@ -2,6 +2,30 @@ import {
   databasePool,
 } from "../../config/database.js";
 
+function mapRosterRow(row) {
+  return {
+    id: row.id,
+    unitId: row.unit_id,
+    unitName: row.unit_name,
+    unitNumber: row.unit_number,
+    zoneId: row.zone_id,
+    zoneName: row.zone_name,
+    zoneNumber: row.zone_number,
+    auditorId: row.auditor_id,
+    auditorName: row.auditor_name,
+    auditorEmail: row.auditor_email,
+    auditeeId: row.auditee_id,
+    auditeeName: row.auditee_name,
+    auditeeEmail: row.auditee_email,
+    effectiveFrom: row.effective_from,
+    effectiveTo: row.effective_to,
+    upcomingCount: Number(
+      row.upcoming_count ?? 0,
+    ),
+    updatedAt: row.updated_at,
+  };
+}
+
 function mapUser(row) {
   return {
     id: row.id,
@@ -317,56 +341,6 @@ export async function findActiveUserAtLocation(
     : null;
 }
 
-/**
- * Nobody can be booked twice on one day, in either role.
- */
-export async function findSchedulingConflict(
-  {
-    scheduledDate,
-    auditorId,
-    auditeeId,
-    excludePatrolId = null,
-  },
-  client = databasePool,
-) {
-  const result = await client.query(
-    `
-      SELECT
-        patrol.id,
-
-        CASE
-          WHEN patrol.auditor_id = $2
-            OR patrol.auditee_id = $2
-          THEN 'AUDITOR'
-          ELSE 'AUDITEE'
-        END AS conflict_type
-
-      FROM patrols AS patrol
-
-      WHERE
-        patrol.scheduled_date = $1::DATE
-        AND patrol.status <> 'CANCELLED'
-        AND (
-          patrol.auditor_id IN ($2, $3)
-          OR patrol.auditee_id IN ($2, $3)
-        )
-        AND (
-          $4::BIGINT IS NULL
-          OR patrol.id <> $4
-        )
-
-      LIMIT 1
-    `,
-    [
-      scheduledDate,
-      auditorId,
-      auditeeId,
-      excludePatrolId,
-    ],
-  );
-
-  return result.rows[0] ?? null;
-}
 
 /**
  * Reassigns who audits and who is audited. Restricted to a patrol still
@@ -534,4 +508,444 @@ export async function findPatrolById(
   );
 
   return mapPatrol(result.rows[0]);
+}
+
+/*
+ * ---------------------------------------------------------------------
+ * Weekly roster: one-time upload that generates every upcoming Monday's
+ * patrol per zone. See docs/14-weekly-roster-plan.md.
+ * ---------------------------------------------------------------------
+ */
+
+/**
+ * The plant's active units and zones, with each zone's own code/number
+ * (for matching a roster row's "Unit"/"Zone" text) and its active area
+ * count (a zone with no areas cannot be scheduled, same rule as the
+ * manual form).
+ */
+export async function findRosterLookupScope(
+  plantId,
+  client = databasePool,
+) {
+  const result = await client.query(
+    `
+      SELECT
+        unit_record.id AS unit_id,
+        unit_record.name AS unit_name,
+        unit_record.code AS unit_code,
+        unit_record.unit_number,
+
+        zone_record.id AS zone_id,
+        zone_record.name AS zone_name,
+        zone_record.code AS zone_code,
+        zone_record.zone_number,
+
+        (
+          SELECT COUNT(*)
+          FROM zone_areas AS zone_area
+          WHERE zone_area.zone_id = zone_record.id
+            AND zone_area.is_active = TRUE
+        ) AS area_count
+
+      FROM units AS unit_record
+
+      JOIN zones AS zone_record
+        ON zone_record.unit_id = unit_record.id
+       AND zone_record.is_active = TRUE
+
+      WHERE
+        unit_record.plant_id = $1
+        AND unit_record.is_active = TRUE
+
+      ORDER BY
+        unit_record.unit_number,
+        unit_record.name,
+        zone_record.zone_number,
+        zone_record.name
+    `,
+    [plantId],
+  );
+
+  return result.rows.map((row) => ({
+    unitId: row.unit_id,
+    unitName: row.unit_name,
+    unitCode: row.unit_code,
+    unitNumber: row.unit_number,
+    zoneId: row.zone_id,
+    zoneName: row.zone_name,
+    zoneCode: row.zone_code,
+    zoneNumber: row.zone_number,
+    areaCount: Number(row.area_count),
+  }));
+}
+
+/**
+ * Active users at a plant, keyed by lower-cased email, for resolving the
+ * roster file's Auditor/Auditee columns.
+ */
+export async function findActiveUsersByEmail(
+  {
+    plantId,
+    emails,
+    excludeUserId = null,
+  },
+  client = databasePool,
+) {
+  const result = await client.query(
+    `
+      SELECT
+        app_user.id,
+        app_user.full_name,
+        app_user.email
+
+      FROM users AS app_user
+
+      WHERE
+        app_user.plant_id = $1
+        AND app_user.is_active = TRUE
+        AND LOWER(app_user.email) = ANY($2::TEXT[])
+        AND ($3::BIGINT IS NULL OR app_user.id <> $3)
+    `,
+    [plantId, emails, excludeUserId],
+  );
+
+  const usersByEmail = new Map();
+
+  for (const row of result.rows) {
+    usersByEmail.set(
+      row.email.toLowerCase(),
+      mapUser(row),
+    );
+  }
+
+  return usersByEmail;
+}
+
+/**
+ * The plant's current roster, one row per zone, with the names/emails
+ * and how many SCHEDULED future patrols each row still has.
+ */
+export async function findRosterForPlant(
+  plantId,
+  client = databasePool,
+) {
+  const result = await client.query(
+    `
+      SELECT
+        roster.id,
+
+        roster.unit_id,
+        unit_record.name AS unit_name,
+        unit_record.unit_number,
+
+        roster.zone_id,
+        zone_record.name AS zone_name,
+        zone_record.zone_number,
+
+        roster.auditor_id,
+        auditor.full_name AS auditor_name,
+        auditor.email AS auditor_email,
+
+        roster.auditee_id,
+        auditee.full_name AS auditee_name,
+        auditee.email AS auditee_email,
+
+        roster.effective_from,
+        roster.effective_to,
+        roster.updated_at,
+
+        (
+          SELECT COUNT(*)
+          FROM patrols AS p
+          WHERE p.roster_id = roster.id
+            AND p.status = 'SCHEDULED'
+            AND p.scheduled_date >= CURRENT_DATE
+        ) AS upcoming_count
+
+      FROM zone_audit_rosters AS roster
+
+      JOIN units AS unit_record
+        ON unit_record.id = roster.unit_id
+
+      JOIN zones AS zone_record
+        ON zone_record.id = roster.zone_id
+
+      JOIN users AS auditor
+        ON auditor.id = roster.auditor_id
+
+      JOIN users AS auditee
+        ON auditee.id = roster.auditee_id
+
+      WHERE roster.plant_id = $1
+
+      ORDER BY
+        unit_record.unit_number,
+        unit_record.name,
+        zone_record.zone_number,
+        zone_record.name
+    `,
+    [plantId],
+  );
+
+  return result.rows.map(mapRosterRow);
+}
+
+
+
+/**
+ * Deletes future, still-SCHEDULED, roster-generated patrols with no
+ * observation report, ahead of regenerating them from a re-upload. A
+ * patrol in the past, one with a report, or one planned by hand is
+ * never touched.
+ */
+export async function deleteUpcomingRosterPatrols(
+  {
+    plantId,
+    fromDate,
+  },
+  client = databasePool,
+) {
+  const result = await client.query(
+    `
+      DELETE FROM patrols AS p
+      USING units AS u
+      WHERE
+        u.id = p.unit_id
+        AND u.plant_id = $1
+        AND p.roster_id IS NOT NULL
+        AND p.status = 'SCHEDULED'
+        AND p.scheduled_date >= $2::DATE
+        AND NOT EXISTS (
+          SELECT 1
+          FROM observation_reports AS o
+          WHERE o.patrol_id = p.id
+        )
+
+      RETURNING p.id
+    `,
+    [plantId, fromDate],
+  );
+
+  return result.rows.length;
+}
+
+/**
+ * Removes roster rows for zones no longer present in a re-uploaded
+ * file. Run after deleteUpcomingRosterPatrols so ON DELETE SET NULL has
+ * already been left with nothing but history rows to touch.
+ */
+export async function deleteRosterRowsNotIn(
+  {
+    plantId,
+    zoneIds,
+  },
+  client = databasePool,
+) {
+  await client.query(
+    `
+      DELETE FROM zone_audit_rosters
+      WHERE
+        plant_id = $1
+        AND zone_id <> ALL($2::BIGINT[])
+    `,
+    [plantId, zoneIds],
+  );
+}
+
+export async function upsertRosterRow(
+  {
+    plantId,
+    unitId,
+    zoneId,
+    auditorId,
+    auditeeId,
+    effectiveFrom,
+    effectiveTo,
+    uploadedBy,
+    sourceFileName,
+  },
+  client = databasePool,
+) {
+  const result = await client.query(
+    `
+      INSERT INTO zone_audit_rosters (
+        plant_id, unit_id, zone_id,
+        auditor_id, auditee_id,
+        effective_from, effective_to,
+        uploaded_by, source_file_name
+      )
+      VALUES (
+        $1, $2, $3, $4, $5, $6::DATE, $7::DATE, $8, $9
+      )
+      ON CONFLICT (zone_id) DO UPDATE SET
+        unit_id = EXCLUDED.unit_id,
+        auditor_id = EXCLUDED.auditor_id,
+        auditee_id = EXCLUDED.auditee_id,
+        effective_from = EXCLUDED.effective_from,
+        effective_to = EXCLUDED.effective_to,
+        uploaded_by = EXCLUDED.uploaded_by,
+        source_file_name = EXCLUDED.source_file_name,
+        updated_at = NOW()
+      RETURNING id
+    `,
+    [
+      plantId,
+      unitId,
+      zoneId,
+      auditorId,
+      auditeeId,
+      effectiveFrom,
+      effectiveTo,
+      uploadedBy,
+      sourceFileName,
+    ],
+  );
+
+  return result.rows[0]?.id ?? null;
+}
+
+/**
+ * Inserts one SCHEDULED patrol per roster row per Monday in
+ * [firstMonday, lastDate], skipping a zone/date pair that already has a
+ * non-cancelled patrol (a manually planned audit keeps its place
+ * instead of being duplicated).
+ */
+export async function generateRosterPatrols(
+  {
+    plantId,
+    plantName,
+    firstMonday,
+    lastDate,
+    ehsOfficerId,
+  },
+  client = databasePool,
+) {
+  const result = await client.query(
+    `
+      INSERT INTO patrols (
+        unit_id, zone_id, auditor_id, auditee_id, scheduled_date,
+        status, plant_location, ehs_officer_id, created_by, roster_id
+      )
+      SELECT
+        r.unit_id, r.zone_id, r.auditor_id, r.auditee_id, monday::DATE,
+        'SCHEDULED', $2, $5, $5, r.id
+      FROM zone_audit_rosters AS r
+      CROSS JOIN GENERATE_SERIES(
+        $3::DATE, $4::DATE, INTERVAL '7 days'
+      ) AS monday
+      WHERE
+        r.plant_id = $1
+        AND NOT EXISTS (
+          SELECT 1
+          FROM patrols AS existing
+          WHERE existing.zone_id = r.zone_id
+            AND existing.scheduled_date = monday::DATE
+            AND existing.status <> 'CANCELLED'
+        )
+
+      RETURNING id
+    `,
+    [
+      plantId,
+      plantName,
+      firstMonday,
+      lastDate,
+      ehsOfficerId,
+    ],
+  );
+
+  return result.rows.length;
+}
+
+/**
+ * A zone's future SCHEDULED patrols in a date range, locked for update
+ * so a concurrent edit cannot race the reassignment below.
+ */
+export async function findUpcomingZonePatrolsForAssignment(
+  {
+    zoneId,
+    fromDate,
+    toDate,
+  },
+  client = databasePool,
+) {
+  const result = await client.query(
+    `
+      SELECT id, scheduled_date
+      FROM patrols
+      WHERE
+        zone_id = $1
+        AND status = 'SCHEDULED'
+        AND scheduled_date BETWEEN $2::DATE AND $3::DATE
+      ORDER BY scheduled_date
+      FOR UPDATE
+    `,
+    [zoneId, fromDate, toDate],
+  );
+
+  return result.rows.map((row) => ({
+    id: row.id,
+    scheduledDate: row.scheduled_date,
+  }));
+}
+
+
+/**
+ * Reassigns the auditor and auditee on every listed patrol still
+ * SCHEDULED. Used to propagate an edit across a zone's upcoming
+ * Mondays.
+ */
+export async function updatePatrolAssignments(
+  {
+    patrolIds,
+    auditorId,
+    auditeeId,
+  },
+  client = databasePool,
+) {
+  const result = await client.query(
+    `
+      UPDATE patrols
+      SET
+        auditor_id = $1,
+        auditee_id = $2,
+        updated_at = NOW()
+      WHERE
+        id = ANY($3::BIGINT[])
+        AND status = 'SCHEDULED'
+      RETURNING id
+    `,
+    [auditorId, auditeeId, patrolIds],
+  );
+
+  return result.rows.length;
+}
+
+/**
+ * Updates a zone's roster row to match a propagated assignment change,
+ * so the next roster upload or view reflects it. Returns null when the
+ * zone has no roster row, which is not an error.
+ */
+export async function updateRosterAssignmentForZone(
+  {
+    zoneId,
+    auditorId,
+    auditeeId,
+  },
+  client = databasePool,
+) {
+  const result = await client.query(
+    `
+      UPDATE zone_audit_rosters
+      SET
+        auditor_id = $1,
+        auditee_id = $2,
+        updated_at = NOW()
+      WHERE zone_id = $3
+      RETURNING id
+    `,
+    [auditorId, auditeeId, zoneId],
+  );
+
+  return result.rows[0] ?? null;
 }

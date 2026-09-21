@@ -604,14 +604,12 @@ export async function findOfficerPlant(
 }
 
 /**
- * One row per zone-patrol, for every unit at this plant, scoped each
- * unit to its own next scheduled week rather than one week shared by
- * the whole plant. A unit with nothing scheduled on or after
- * `weekStart` still appears (unit_id/unit_name set, every patrol
- * column null), so the officer sees a card per unit they manage even
- * when a unit currently has nothing planned.
+ * One row per zone-patrol scheduled in the plant's single upcoming
+ * inspection week: the nearest week, on or after `weekStart`, that has
+ * at least one non-cancelled patrol anywhere in the plant. Empty
+ * (`[]`) when nothing is scheduled from `weekStart` onward.
  */
-export async function findOfficerUnitWeeklyPlans(
+export async function findOfficerWeekPatrols(
   {
     plantId,
     weekStart,
@@ -620,49 +618,36 @@ export async function findOfficerUnitWeeklyPlans(
 ) {
   const result = await client.query(
     `
-      WITH officer_units AS (
-        SELECT
-          unit_record.id,
-          unit_record.name,
-          unit_record.unit_number
-        FROM units AS unit_record
+      WITH plant_next_date AS (
+        SELECT MIN(p.scheduled_date) AS next_date
+        FROM patrols p
+        JOIN units u
+          ON u.id = p.unit_id
         WHERE
-          unit_record.plant_id = $1
-          AND unit_record.is_active = TRUE
-      ),
-
-      next_dates AS (
-        SELECT
-          officer_units.id AS unit_id,
-          MIN(p.scheduled_date) AS next_date
-        FROM officer_units
-        LEFT JOIN patrols p
-          ON p.unit_id = officer_units.id
+          u.plant_id = $1
           AND p.status <> 'CANCELLED'
           AND p.scheduled_date >= $2::DATE
-        GROUP BY officer_units.id
       ),
 
-      unit_weeks AS (
+      week_bounds AS (
         SELECT
-          unit_id,
           DATE_TRUNC('week', next_date)::DATE
             AS week_start,
           (
             DATE_TRUNC('week', next_date)
             + INTERVAL '6 day'
           )::DATE AS week_end
-        FROM next_dates
+        FROM plant_next_date
         WHERE next_date IS NOT NULL
       )
 
       SELECT
-        officer_units.id AS unit_id,
-        officer_units.name AS unit_name,
-        officer_units.unit_number,
+        u.id AS unit_id,
+        u.name AS unit_name,
+        u.unit_number,
 
-        unit_weeks.week_start,
-        unit_weeks.week_end,
+        week_bounds.week_start,
+        week_bounds.week_end,
 
         p.id AS patrol_id,
         p.scheduled_date,
@@ -681,24 +666,25 @@ export async function findOfficerUnitWeeklyPlans(
         observation_report.id
           AS observation_report_id,
 
+        observation_report.no_observations,
+
         closure_request.id AS closure_id,
         closure_request.status AS closure_status
 
-      FROM officer_units
+      FROM week_bounds
 
-      LEFT JOIN unit_weeks
-        ON unit_weeks.unit_id = officer_units.id
-
-      LEFT JOIN patrols p
-        ON p.unit_id = officer_units.id
-        AND p.status <> 'CANCELLED'
-        AND unit_weeks.week_start IS NOT NULL
+      JOIN patrols p
+        ON p.status <> 'CANCELLED'
         AND p.scheduled_date >=
-            unit_weeks.week_start
+            week_bounds.week_start
         AND p.scheduled_date <=
-            unit_weeks.week_end
+            week_bounds.week_end
 
-      LEFT JOIN zones z
+      JOIN units u
+        ON u.id = p.unit_id
+        AND u.plant_id = $1
+
+      JOIN zones z
         ON z.id = p.zone_id
 
       LEFT JOIN users auditor
@@ -716,7 +702,8 @@ export async function findOfficerUnitWeeklyPlans(
         ON closure_request.patrol_id = p.id
 
       ORDER BY
-        officer_units.name ASC,
+        u.unit_number ASC,
+        u.name ASC,
         z.name ASC,
         p.scheduled_date ASC
     `,
@@ -747,6 +734,9 @@ export async function findOfficerUnitWeeklyPlans(
 
     observationReportId:
       row.observation_report_id,
+
+    noObservations:
+      row.no_observations ?? false,
 
     closureId: row.closure_id,
     closureStatus: row.closure_status,

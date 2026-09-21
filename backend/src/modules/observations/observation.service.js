@@ -1,6 +1,9 @@
 import {
   unlink,
+  access,
 } from "node:fs/promises";
+
+import path from "node:path";
 
 import {
   withTransaction,
@@ -12,46 +15,76 @@ import AppError
 import * as observationRepository
   from "./observation.repository.js";
 
-import {
-  access,
-} from "node:fs/promises";
-
-import path from "node:path";
-
 const MAX_DESCRIPTION_WORDS = 500;
+const MAX_OBSERVATIONS_PER_REPORT = 10;
+const HISTORY_WINDOW_MONTHS = 6;
 
-const ALLOWED_CATEGORY_VALUES =
-  new Set([
-    "UA",
-    "UC",
-  ]);
+const MANAGEMENT_ROLE_CODES = new Set([
+  "EHS_OFFICER",
+  "HOD",
+  "PLANT_HEAD",
+  "ADMIN",
+]);
 
-const ALLOWED_RISK_VALUES =
-  new Set([
-    "HIGH",
-    "MEDIUM",
-    "LOW",
-  ]);
-
-// Get the current date //
+/**
+ * Today in the server's timezone, as YYYY-MM-DD. Containers run UTC so
+ * this matches the dashboard, which works in UTC throughout.
+ */
 function getCurrentDate() {
-  const date = new Date();
-
-  const year =
-    date.getFullYear();
-
-  const month =
-    String(date.getMonth() + 1)
-      .padStart(2, "0");
-
-  const day =
-    String(date.getDate())
-      .padStart(2, "0");
-
-  return `${year}-${month}-${day}`;
+  return new Date()
+    .toISOString()
+    .slice(0, 10);
 }
 
-// Count the number of words, required for the observation text
+/*
+ * A DATE column comes back from `pg` as a JS Date, not a string. Used
+ * only for values read back from the database.
+ */
+function toDateOnlyString(value) {
+  if (value instanceof Date) {
+    return value.toISOString().slice(0, 10);
+  }
+
+  return String(value ?? "").slice(0, 10);
+}
+
+/** Monday of the ISO week containing dateOnly, as "YYYY-MM-DD". */
+function getIsoWeekStart(dateOnly) {
+  const date = new Date(
+    `${dateOnly}T00:00:00Z`,
+  );
+
+  const daysFromMonday =
+    (date.getUTCDay() + 6) % 7;
+
+  date.setUTCDate(
+    date.getUTCDate() - daysFromMonday,
+  );
+
+  return date
+    .toISOString()
+    .slice(0, 10);
+}
+
+/** Thursday of the ISO week the audit falls in: Monday + 3 days. */
+function getDueDate(scheduledDateOnly) {
+  const weekStart = getIsoWeekStart(
+    scheduledDateOnly,
+  );
+
+  const date = new Date(
+    `${weekStart}T00:00:00Z`,
+  );
+
+  date.setUTCDate(
+    date.getUTCDate() + 3,
+  );
+
+  return date
+    .toISOString()
+    .slice(0, 10);
+}
+
 function countWords(value) {
   const normalizedValue =
     String(value ?? "").trim();
@@ -66,18 +99,42 @@ function countWords(value) {
     .length;
 }
 
-// 
-export async function getObservationPhotograph({
-  userId,
-  reportId,
-}) {
-  const photograph =
-    await observationRepository
-      .findPhotographByReportId({
-        reportId,
-        userId,
-      });
+async function safelyDeleteFile(
+  filePath,
+) {
+  if (!filePath) {
+    return;
+  }
 
+  try {
+    await unlink(filePath);
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      console.error(
+        "Unable to remove uploaded observation file:",
+        error,
+      );
+    }
+  }
+}
+
+async function safelyDeleteFiles(files) {
+  await Promise.all(
+    (files ?? []).map((file) =>
+      safelyDeleteFile(file?.path),
+    ),
+  );
+}
+
+/**
+ * Resolves a stored photograph's absolute path, guarding against a
+ * path escaping the observations upload directory and confirming the
+ * file still exists on disk. Shared by the report-level (item #1) and
+ * item-level photograph routes.
+ */
+async function resolvePhotographFile(
+  photograph,
+) {
   if (
     !photograph ||
     !photograph.photograph_path
@@ -100,7 +157,6 @@ export async function getObservationPhotograph({
       "uploads",
       "observations",
     );
-    // Microsoft Graph API to get the access 
 
   if (
     !absolutePath.startsWith(
@@ -139,68 +195,225 @@ export async function getObservationPhotograph({
   };
 }
 
-function normalizeReportStatus(status) {
-  const normalizedStatus =
-    String(status ?? "")
-      .trim()
-      .toUpperCase();
+export async function getObservationPhotograph({
+  userId,
+  reportId,
+}) {
+  const photograph =
+    await observationRepository
+      .findPhotographByReportId({
+        reportId,
+        userId,
+      });
 
-  if (
-    normalizedStatus === "CLOSED" ||
-    normalizedStatus === "COMPLETED" ||
-    normalizedStatus === "APPROVED"
-  ) {
-    return "CLOSED";
-  }
-
-  return normalizedStatus;
+  return resolvePhotographFile(
+    photograph,
+  );
 }
 
-function createReportResponse(report) {
+/**
+ * One observation's own photograph, for a multi-observation report.
+ */
+export async function getObservationItemPhotograph({
+  userId,
+  reportId,
+  itemId,
+}) {
+  const photograph =
+    await observationRepository
+      .findItemPhotograph({
+        reportId,
+        itemId,
+        userId,
+      });
+
+  return resolvePhotographFile(
+    photograph,
+  );
+}
+
+/*
+ * Reads the closure/ticket status off either shape the repository
+ * returns: the flat closureStatus/ticketStatus fields carried by the
+ * weekly-assignments and history rows, or the nested closure/ticket
+ * objects findReportByIdForUser builds.
+ */
+function resolveLifecycleInputs(
+  report,
+) {
   return {
-    ...report,
+    closureStatus:
+      report.closureStatus ??
+      report.closure?.status ??
+      null,
 
-    status:
-      normalizeReportStatus(
-        report.status,
-      ),
+    ticketStatus:
+      report.ticketStatus ??
+      report.ticket?.status ??
+      null,
 
-    displayStatus:
-      normalizeReportStatus(
-        report.status,
-      ) === "CLOSED"
-        ? "Closed"
-        : "In Progress",
+    ticketDecision:
+      report.ticketDecision ??
+      report.ticket?.decision ??
+      null,
   };
 }
 
-async function safelyDeleteFile(
-  filePath,
-) {
-  if (!filePath) {
-    return;
+/*
+ * A ticket closed on this report's closure always means "closed via
+ * ticket", even if the closure itself was later approved: the ticket
+ * outcome is the fact that answers "was the plan implemented or
+ * rejected", which is what this label is for.
+ */
+function computeLifecycle({
+  noObservations,
+  closureStatus,
+  ticketStatus,
+  ticketDecision,
+}) {
+  if (noObservations) {
+    return {
+      lifecycleStatus: "NO_OBSERVATIONS",
+      lifecycleLabel:
+        "Closed – no observations",
+    };
   }
 
-  try {
-    await unlink(filePath);
-  } catch (error) {
-    if (error.code !== "ENOENT") {
-      console.error(
-        "Unable to remove uploaded observation file:",
-        error,
-      );
-    }
+  if (
+    String(ticketStatus ?? "")
+      .toUpperCase() === "CLOSED"
+  ) {
+    return {
+      lifecycleStatus:
+        "CLOSED_VIA_TICKET",
+
+      lifecycleLabel:
+        String(ticketDecision ?? "")
+          .toUpperCase() === "REJECTED"
+          ? "Closed – plan rejected"
+          : "Closed – action implemented",
+    };
   }
+
+  const normalizedClosureStatus = String(
+    closureStatus ?? "",
+  ).toUpperCase();
+
+  if (
+    normalizedClosureStatus ===
+    "SUBMITTED_FOR_CLOSURE"
+  ) {
+    return {
+      lifecycleStatus:
+        "EHS_OFFICER_ACTION_REQUIRED",
+      lifecycleLabel:
+        "EHS Officer action required",
+    };
+  }
+
+  if (normalizedClosureStatus === "APPROVED") {
+    return {
+      lifecycleStatus: "APPROVED",
+      lifecycleLabel:
+        "Approved by EHS Officer",
+    };
+  }
+
+  if (
+    normalizedClosureStatus === "IN_PROGRESS"
+  ) {
+    return {
+      lifecycleStatus:
+        "ACTION_PLAN_IN_PROGRESS",
+      lifecycleLabel:
+        "Action plan being implemented",
+    };
+  }
+
+  return {
+    lifecycleStatus: "WITH_AUDITEE",
+    lifecycleLabel: "With auditee",
+  };
 }
 
 /**
- * Returns the current weekly patrol assigned to the
- * authenticated user as an auditor.
- * Should return all the assignments for a user
+ * From the auditor's point of view a report is Open (nothing filed) or
+ * Closed (filed and sent to the auditee, or closed with no observation
+ * to record). `lifecycleStatus`/`lifecycleLabel` carry the fuller
+ * downstream journey (closure, ticket) for views that want it; the
+ * stored `status` column itself is passed through unchanged.
  */
+function createReportResponse(report) {
+  if (!report) {
+    return null;
+  }
+
+  const noObservations =
+    report.noObservations === true;
+
+  const {
+    closureStatus,
+    ticketStatus,
+    ticketDecision,
+  } = resolveLifecycleInputs(report);
+
+  const {
+    lifecycleStatus,
+    lifecycleLabel,
+  } = computeLifecycle({
+    noObservations,
+    closureStatus,
+    ticketStatus,
+    ticketDecision,
+  });
+
+  const closure =
+    report.closure ??
+    (report.closureId
+      ? {
+          id: report.closureId,
+          status: report.closureStatus,
+        }
+      : null);
+
+  const ticket =
+    report.ticket ??
+    (report.ticketId
+      ? {
+          id: report.ticketId,
+          status: report.ticketStatus,
+          decision: report.ticketDecision,
+          closureDate:
+            report.ticketClosureDate,
+        }
+      : null);
+
+  return {
+    ...report,
+
+    noObservations,
+
+    outcome: noObservations
+      ? "NO_OBSERVATIONS"
+      : "SENT_TO_AUDITEE",
+
+    displayStatus: noObservations
+      ? "Closed – no observations"
+      : "Closed – sent to auditee",
+
+    closure,
+    ticket,
+
+    lifecycleStatus,
+    lifecycleLabel,
+  };
+}
+
 /**
- * Every patrol this user is auditing this week, split into the ones
- * still needing a report and the ones already filed.
+ * Every patrol this user is auditing this week, plus any still-unfiled
+ * audit from the previous 4 weeks (so a missed Thursday deadline does
+ * not silently disappear when the week rolls over), split into pending
+ * and submitted.
  */
 export async function getWeeklyAssignments({
   userId,
@@ -213,33 +426,56 @@ export async function getWeeklyAssignments({
         currentDate,
       });
 
-  const weekStart = new Date(
-    `${currentDate}T00:00:00Z`,
+  const weekStartDate =
+    getIsoWeekStart(currentDate);
+
+  const weekEndDateObject = new Date(
+    `${weekStartDate}T00:00:00Z`,
   );
 
-  /* DATE_TRUNC('week') is Monday-based, and so is this. */
-  const daysFromMonday =
-    (weekStart.getUTCDay() + 6) % 7;
-
-  weekStart.setUTCDate(
-    weekStart.getUTCDate() - daysFromMonday,
+  weekEndDateObject.setUTCDate(
+    weekEndDateObject.getUTCDate() + 6,
   );
 
-  const weekEnd = new Date(weekStart);
-  weekEnd.setUTCDate(
-    weekEnd.getUTCDate() + 6,
-  );
+  const weekEndDate = weekEndDateObject
+    .toISOString()
+    .slice(0, 10);
 
   const decorated = assignments.map(
-    (assignment) => ({
-      ...assignment,
+    (assignment) => {
+      const scheduledDateOnly =
+        toDateOnlyString(
+          assignment.scheduledDate,
+        );
 
-      report: assignment.report
-        ? createReportResponse(
-            assignment.report,
-          )
-        : null,
-    }),
+      const dueDate = getDueDate(
+        scheduledDateOnly,
+      );
+
+      return {
+        ...assignment,
+
+        dueDate,
+
+        isFromEarlierWeek:
+          scheduledDateOnly <
+          weekStartDate,
+
+        isOverdue:
+          !assignment.report &&
+          currentDate > dueDate,
+
+        reportStatus: assignment.report
+          ? "CLOSED"
+          : "OPEN",
+
+        report: assignment.report
+          ? createReportResponse(
+              assignment.report,
+            )
+          : null,
+      };
+    },
   );
 
   const pending = decorated.filter(
@@ -250,23 +486,25 @@ export async function getWeeklyAssignments({
     (assignment) => assignment.report,
   );
 
-  return {
-    weekStartDate: weekStart
-      .toISOString()
-      .slice(0, 10),
+  const overdueCount = pending.filter(
+    (assignment) => assignment.isOverdue,
+  ).length;
 
-    weekEndDate: weekEnd
-      .toISOString()
-      .slice(0, 10),
+  return {
+    weekStartDate,
+    weekEndDate,
 
     pendingCount: pending.length,
     submittedCount: submitted.length,
+    overdueCount,
+
     assignments: decorated,
   };
 }
 
 /**
- * One filed report, for the read-only detail view.
+ * One filed report, with its observations, for the read-only detail
+ * view.
  */
 export async function getObservationReport({
   userId,
@@ -287,8 +525,19 @@ export async function getObservationReport({
     );
   }
 
+  const observations =
+    report.noObservations
+      ? []
+      : await observationRepository
+          .findItemsByReportId(
+            reportId,
+          );
+
   return {
-    report: createReportResponse(report),
+    report: createReportResponse({
+      ...report,
+      observations,
+    }),
   };
 }
 
@@ -296,79 +545,51 @@ export async function submitObservation({
   userId,
   patrolId,
   findingDate,
-  category,
-  description,
-  riskCategory,
-  zoneAreaId,
-  photograph,
+  observations,
+  photographs,
 }) {
-  if (!photograph) {
-    throw new AppError(
-      "An observation photograph is required.",
-      400,
-      "OBSERVATION_PHOTOGRAPH_REQUIRED",
-    );
-  }
+  const items = Array.isArray(
+    observations,
+  )
+    ? observations
+    : [];
 
-  const normalizedCategory =
-    String(category ?? "")
-      .trim()
-      .toUpperCase();
-
-  const normalizedRiskCategory =
-    String(riskCategory ?? "")
-      .trim()
-      .toUpperCase();
-
-  const normalizedDescription =
-    String(description ?? "").trim();
+  const files = Array.isArray(
+    photographs,
+  )
+    ? photographs
+    : [];
 
   /*
-   * Every rejection below deletes the uploaded file first. multer has
-   * already written it to disk by the time this runs, so returning
-   * early without unlinking would leak an orphan for every bad request.
+   * multer has already written every file to disk by the time this
+   * runs, so any early return below must clean them all up first.
    */
   async function reject(message, code) {
-    await safelyDeleteFile(photograph.path);
+    await safelyDeleteFiles(files);
     throw new AppError(message, 400, code);
   }
 
-  if (
-    !ALLOWED_CATEGORY_VALUES.has(
-      normalizedCategory,
-    )
-  ) {
+  if (items.length === 0) {
     await reject(
-      "Select UA or UC as the observation category.",
-      "INVALID_OBSERVATION_CATEGORY",
+      "Add at least one observation.",
+      "OBSERVATION_REQUIRED",
     );
   }
 
   if (
-    !ALLOWED_RISK_VALUES.has(
-      normalizedRiskCategory,
-    )
+    items.length >
+    MAX_OBSERVATIONS_PER_REPORT
   ) {
     await reject(
-      "Select a valid risk category.",
-      "INVALID_RISK_CATEGORY",
+      `Up to ${MAX_OBSERVATIONS_PER_REPORT} observations per report.`,
+      "TOO_MANY_OBSERVATIONS",
     );
   }
 
-  if (!normalizedDescription) {
+  if (files.length !== items.length) {
     await reject(
-      "Enter the observation description.",
-      "OBSERVATION_DESCRIPTION_REQUIRED",
-    );
-  }
-
-  if (
-    countWords(normalizedDescription) >
-    MAX_DESCRIPTION_WORDS
-  ) {
-    await reject(
-      `Observation description cannot exceed ${MAX_DESCRIPTION_WORDS} words.`,
-      "OBSERVATION_DESCRIPTION_TOO_LONG",
+      "Attach exactly one photograph per observation.",
+      "OBSERVATION_PHOTOGRAPH_COUNT_MISMATCH",
     );
   }
 
@@ -423,26 +644,57 @@ export async function submitObservation({
 
         /*
          * A patrol covers the whole zone, so the auditor names the area
-         * the finding occurred in. It must be one of that zone's own
-         * areas; an id from another zone is rejected rather than stored.
+         * each observation was in. Every area must be one of that
+         * zone's own; an id from another zone is rejected rather than
+         * stored.
          */
-        const areas = Array.isArray(patrol.areas)
+        const areas = Array.isArray(
+          patrol.areas,
+        )
           ? patrol.areas
           : [];
 
-        const selectedArea = areas.find(
-          (area) =>
-            Number(area.id) ===
-            Number(zoneAreaId),
-        );
+        const resolvedItems = items.map(
+          (item, index) => {
+            const selectedArea =
+              areas.find(
+                (area) =>
+                  Number(area.id) ===
+                  Number(
+                    item.zoneAreaId,
+                  ),
+              );
 
-        if (!selectedArea) {
-          throw new AppError(
-            "Select the area of the zone where the observation was made.",
-            400,
-            "AREA_NOT_IN_PATROL_ZONE",
-          );
-        }
+            if (!selectedArea) {
+              throw new AppError(
+                `Observation ${index + 1}: select the area of the zone where the observation was made.`,
+                400,
+                "AREA_NOT_IN_PATROL_ZONE",
+              );
+            }
+
+            const file = files[index];
+
+            return {
+              zoneAreaId:
+                selectedArea.id,
+              observationLocation:
+                selectedArea.name,
+              category: item.category,
+              description:
+                item.description,
+              riskCategory:
+                item.riskCategory,
+              photograph: {
+                path: file.path,
+                originalName:
+                  file.originalname,
+                mimeType: file.mimetype,
+                size: file.size,
+              },
+            };
+          },
+        );
 
         if (!patrol.auditeeId) {
           throw new AppError(
@@ -458,33 +710,19 @@ export async function submitObservation({
               {
                 patrolId,
                 auditorId: userId,
-                auditeeId: patrol.auditeeId,
+                auditeeId:
+                  patrol.auditeeId,
                 findingDate,
 
                 /*
-                 * Both derived from the patrol. Trusting a submitted
+                 * Derived from the patrol. Trusting a submitted
                  * location would let a report claim a different site
                  * from the audit it belongs to.
                  */
                 plantLocation:
                   patrol.plantLocation,
 
-                observationLocation:
-                  selectedArea.name,
-
-                category: normalizedCategory,
-                description: normalizedDescription,
-                riskCategory:
-                  normalizedRiskCategory,
-                zoneAreaId: selectedArea.id,
-                photograph: {
-                  path: photograph.path,
-                  originalName:
-                    photograph.originalname,
-                  mimeType:
-                    photograph.mimetype,
-                  size: photograph.size,
-                },
+                items: resolvedItems,
               },
               client,
             );
@@ -514,16 +752,27 @@ export async function submitObservation({
           );
         }
 
+        /*
+         * One closure item per observation, so the auditee writes a
+         * plan per observation and each can go to its own department.
+         */
+        await observationRepository
+          .createClosureItems(
+            {
+              closureId: closure.id,
+              observationReportId:
+                createdReport.id,
+            },
+            client,
+          );
+
         await observationRepository
           .updatePatrolAfterSubmission(
             patrolId,
             client,
           );
 
-        return {
-          ...createdReport,
-          areaName: selectedArea.name,
-        };
+        return createdReport;
       },
     );
 
@@ -534,7 +783,7 @@ export async function submitObservation({
       report: createReportResponse(report),
     };
   } catch (error) {
-    await safelyDeleteFile(photograph.path);
+    await safelyDeleteFiles(files);
 
     if (error?.code === "23505") {
       throw new AppError(
@@ -546,4 +795,171 @@ export async function submitObservation({
 
     throw error;
   }
+}
+
+/**
+ * "No observation to record": closes an open audit with nothing filed,
+ * for the case where the auditor found nothing of note in the zone.
+ * Opens no closure and completes the patrol directly.
+ */
+export async function recordNoObservation({
+  userId,
+  patrolId,
+}) {
+  const report = await withTransaction(
+    async (client) => {
+      const patrol =
+        await observationRepository
+          .findPatrolForSubmission(
+            {
+              patrolId,
+              auditorId: userId,
+            },
+            client,
+          );
+
+      if (!patrol) {
+        throw new AppError(
+          "The patrol was not found or is not assigned to you as auditor.",
+          404,
+          "ASSIGNED_PATROL_NOT_FOUND",
+        );
+      }
+
+      const existingReport =
+        await observationRepository
+          .findReportByPatrolId(
+            patrolId,
+            client,
+          );
+
+      if (existingReport) {
+        throw new AppError(
+          "A Patrol Observation Report already exists for this audit.",
+          409,
+          "OBSERVATION_REPORT_ALREADY_EXISTS",
+        );
+      }
+
+      if (
+        ![
+          "SCHEDULED",
+          "IN_PROGRESS",
+        ].includes(patrol.status)
+      ) {
+        throw new AppError(
+          "This patrol cannot accept a new observation report in its current status.",
+          409,
+          "PATROL_STATUS_NOT_ELIGIBLE",
+        );
+      }
+
+      if (!patrol.auditeeId) {
+        throw new AppError(
+          "This patrol has no auditee assigned.",
+          409,
+          "PATROL_AUDITEE_NOT_ASSIGNED",
+        );
+      }
+
+      const createdReport =
+        await observationRepository
+          .createNoObservationReport(
+            {
+              patrolId,
+              auditorId: userId,
+              auditeeId:
+                patrol.auditeeId,
+              findingDate:
+                getCurrentDate(),
+              plantLocation:
+                patrol.plantLocation,
+            },
+            client,
+          );
+
+      const completed =
+        await observationRepository
+          .completePatrolWithoutObservations(
+            patrolId,
+            client,
+          );
+
+      if (!completed) {
+        throw new AppError(
+          "The audit could not be closed.",
+          500,
+          "PATROL_COMPLETION_FAILED",
+        );
+      }
+
+      return createdReport;
+    },
+  );
+
+  return {
+    message:
+      "Audit closed with no observation to record. The auditee and EHS Officer can see this on their dashboards.",
+
+    report: createReportResponse(report),
+  };
+}
+
+/**
+ * Every observation report from the last 6 months the caller can see:
+ * their own patrols, or, for a management role, every report at their
+ * plant.
+ */
+export async function getObservationHistory({
+  user,
+  filter = "all",
+}) {
+  const roles = Array.isArray(user?.roles)
+    ? user.roles.map((role) =>
+        String(role).toUpperCase(),
+      )
+    : [];
+
+  const managementScope = roles.some(
+    (role) =>
+      MANAGEMENT_ROLE_CODES.has(role),
+  );
+
+  const plantId = managementScope
+    ? await observationRepository
+        .findUserPlantId(user.id)
+    : null;
+
+  const sixMonthsAgo = new Date();
+
+  sixMonthsAgo.setUTCMonth(
+    sixMonthsAgo.getUTCMonth() -
+      HISTORY_WINDOW_MONTHS,
+  );
+
+  const fromDate = sixMonthsAgo
+    .toISOString()
+    .slice(0, 10);
+
+  const rows =
+    await observationRepository
+      .findReportHistory({
+        userId: user.id,
+        plantId,
+        managementScope:
+          managementScope &&
+          Boolean(plantId),
+        fromDate,
+        filter,
+      });
+
+  return {
+    windowMonths: HISTORY_WINDOW_MONTHS,
+    filter,
+    count: rows.length,
+
+    reports: rows.map((row) =>
+      createReportResponse(row),
+    ),
+  };
 }

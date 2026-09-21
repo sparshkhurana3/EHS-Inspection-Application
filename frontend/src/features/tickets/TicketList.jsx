@@ -28,8 +28,17 @@ function TicketCard({ ticket, onOpen }) {
           </span>
 
           <span>
+            {ticket.departmentName
+              ? `${ticket.departmentName} · `
+              : ""}
             Raised by {ticket.auditeeName}
           </span>
+
+          {ticket.wasReopened ? (
+            <span className="ticket-reopened-tag">
+              Reopened by the EHS Officer
+            </span>
+          ) : null}
         </span>
 
         <span className="closure-list-meta">

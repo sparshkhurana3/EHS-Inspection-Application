@@ -92,7 +92,7 @@ export async function rejectClosure(
 }
 
 
-export async function saveActionPlan(
+export async function saveClosureItem(
   req,
   res,
   next,
@@ -100,11 +100,14 @@ export async function saveActionPlan(
   try {
     const result =
       await closureService
-        .saveActionPlan({
+        .saveClosureItem({
           userId: req.user.id,
 
           closureId:
             req.params.closureId,
+
+          closureItemId:
+            req.params.closureItemId,
 
           actionPlan:
             req.body.actionPlan,
@@ -112,8 +115,8 @@ export async function saveActionPlan(
           targetDate:
             req.body.targetDate,
 
-          actionHodId:
-            req.body.actionHodId,
+          departmentId:
+            req.body.departmentId,
         });
 
     res.status(200).json(result);
@@ -122,7 +125,7 @@ export async function saveActionPlan(
   }
 }
 
-export async function getActionHodOptions(
+export async function getDepartmentOptions(
   req,
   res,
   next,
@@ -130,7 +133,7 @@ export async function getActionHodOptions(
   try {
     const result =
       await closureService
-        .getActionHodOptions({
+        .getDepartmentOptions({
           userId: req.user.id,
 
           closureId:

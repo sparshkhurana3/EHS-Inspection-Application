@@ -15,6 +15,9 @@ function mapTicket(row) {
     closureRequestId:
       row.closure_request_id,
 
+    closureItemId:
+      row.closure_item_id ?? null,
+
     observationReportId:
       row.observation_report_id,
 
@@ -54,6 +57,40 @@ function mapTicket(row) {
     completionNotes:
       row.completion_notes,
 
+    /* The HOD's write-up of the work done, shown at approval. */
+    resolutionComments:
+      row.completion_notes,
+
+    departmentId:
+      row.department_id ?? null,
+
+    departmentName:
+      row.department_name ?? null,
+
+    submittedForApprovalAt:
+      row.submitted_for_approval_at,
+
+    approvedBy:
+      row.approved_by ?? null,
+
+    approvedByName:
+      row.approved_by_name ?? null,
+
+    approvedAt:
+      row.approved_at,
+
+    approvalComments:
+      row.approval_comments,
+
+    reopenComments:
+      row.reopen_comments,
+
+    reopenedAt:
+      row.reopened_at,
+
+    reopenCount:
+      Number(row.reopen_count ?? 0),
+
     assignedAt:
       row.assigned_at,
 
@@ -81,13 +118,21 @@ function mapTicket(row) {
     observationLocation:
       row.observation_location,
 
+    /*
+     * A ticket is raised for one observation, so the fields the Action
+     * HOD reads describe that observation, falling back to the
+     * report's own columns for a ticket raised before plans became
+     * per-observation.
+     */
     category:
-      row.category,
+      row.ticket_category ?? row.category,
 
     riskCategory:
+      row.ticket_risk_category ??
       row.risk_category,
 
     observationDescription:
+      row.ticket_observation_description ??
       row.observation_description,
 
     photographPath:
@@ -97,7 +142,25 @@ function mapTicket(row) {
       row.zone_area_id,
 
     areaName:
-      row.area_name,
+      row.ticket_area_name ?? row.area_name,
+
+    observationItemId:
+      row.ticket_observation_id ?? null,
+
+    observationSequenceNumber:
+      row.ticket_observation_sequence
+        ? Number(
+            row.ticket_observation_sequence,
+          )
+        : null,
+
+    /*
+     * Every observation on the underlying report (docs/15-
+     * observations-refinement-plan.md, D2); the fields above stay
+     * filled with observation #1.
+     */
+    observations:
+      row.observations ?? [],
 
     scheduledDate:
       row.scheduled_date,
@@ -153,6 +216,7 @@ const TICKET_SELECT = `
     ticket.status AS ticket_status,
     ticket.decision AS ticket_decision,
     ticket.closure_request_id,
+    ticket.closure_item_id,
     ticket.observation_report_id,
     ticket.patrol_id,
     ticket.closure_round,
@@ -164,6 +228,16 @@ const TICKET_SELECT = `
     ticket.comments,
     ticket.corrective_action_type_id,
     ticket.completion_notes,
+    ticket.department_id,
+    ticket_department.name AS department_name,
+    ticket.submitted_for_approval_at,
+    ticket.approved_by,
+    approver.full_name AS approved_by_name,
+    ticket.approved_at,
+    ticket.approval_comments,
+    ticket.reopen_comments,
+    ticket.reopened_at,
+    ticket.reopen_count,
     ticket.assigned_at,
     ticket.decided_at,
     ticket.closure_date AS ticket_closure_date,
@@ -182,6 +256,37 @@ const TICKET_SELECT = `
     observation_report.photograph_path,
     observation_report.zone_area_id,
     report_area.name AS area_name,
+
+    ticket_observation.id
+      AS ticket_observation_id,
+    ticket_observation.category
+      AS ticket_category,
+    ticket_observation.risk_category
+      AS ticket_risk_category,
+    ticket_observation.description
+      AS ticket_observation_description,
+    ticket_observation.sequence_number
+      AS ticket_observation_sequence,
+    ticket_area.name AS ticket_area_name,
+
+    COALESCE((
+      SELECT JSON_AGG(
+        JSON_BUILD_OBJECT(
+          'id', item.id,
+          'sequenceNumber', item.sequence_number,
+          'areaName', item_area.name,
+          'category', item.category,
+          'description', item.description,
+          'riskCategory', item.risk_category
+        )
+        ORDER BY item.sequence_number
+      )
+      FROM observation_items AS item
+      LEFT JOIN zone_areas AS item_area
+        ON item_area.id = item.zone_area_id
+      WHERE item.observation_report_id =
+        observation_report.id
+    ), '[]'::JSON) AS observations,
 
     patrol.scheduled_date,
 
@@ -229,6 +334,27 @@ const TICKET_SELECT = `
 
   LEFT JOIN corrective_action_types AS action_type
     ON action_type.id = ticket.corrective_action_type_id
+
+  LEFT JOIN departments AS ticket_department
+    ON ticket_department.id = ticket.department_id
+
+  LEFT JOIN users AS approver
+    ON approver.id = ticket.approved_by
+
+  /*
+   * The one observation this ticket is for. A ticket raised before
+   * plans became per-observation has no closure item, so these stay
+   * null and the report-level columns above are used instead.
+   */
+  LEFT JOIN closure_items AS ticket_closure_item
+    ON ticket_closure_item.id = ticket.closure_item_id
+
+  LEFT JOIN observation_items AS ticket_observation
+    ON ticket_observation.id =
+       ticket_closure_item.observation_item_id
+
+  LEFT JOIN zone_areas AS ticket_area
+    ON ticket_area.id = ticket_observation.zone_area_id
 `;
 
 /*
@@ -243,6 +369,46 @@ const TICKET_READ_PREDICATE = `
     OR patrol.auditor_id = $2
     OR patrol.auditee_id = $2
     OR patrol.ehs_officer_id = $2
+    OR EXISTS (
+      SELECT 1
+      FROM users AS reader
+      JOIN user_roles AS reader_role_link
+        ON reader_role_link.user_id = reader.id
+      JOIN roles AS reader_role
+        ON reader_role.id = reader_role_link.role_id
+      WHERE
+        reader.id = $2
+        AND reader.plant_id = unit.plant_id
+        AND reader_role.code IN (
+          'EHS_OFFICER', 'HOD',
+          'PLANT_HEAD', 'ADMIN'
+        )
+    )
+  )
+`;
+
+/*
+ * Who may approve or reopen a ticket: the patrol's own EHS Officer, or
+ * a management user at that plant (docs/17, D7).
+ */
+const TICKET_APPROVER_PREDICATE = `
+  (
+    patrol.ehs_officer_id = $1
+    OR EXISTS (
+      SELECT 1
+      FROM users AS approver_user
+      JOIN user_roles AS approver_role_link
+        ON approver_role_link.user_id = approver_user.id
+      JOIN roles AS approver_role
+        ON approver_role.id = approver_role_link.role_id
+      WHERE
+        approver_user.id = $1
+        AND approver_user.plant_id = unit.plant_id
+        AND approver_role.code IN (
+          'EHS_OFFICER', 'HOD',
+          'PLANT_HEAD', 'ADMIN'
+        )
+    )
   )
 `;
 
@@ -557,8 +723,9 @@ export async function acceptTicket(
 }
 
 /**
- * Reject the proposed plan: OPEN -> CLOSED immediately, no work done on
- * the ground. correctiveActionTypeId is optional here.
+ * Reject the proposed plan: OPEN -> PENDING_APPROVAL. The EHS Officer
+ * closes the ticket or sends it back (docs/17, D4); no work is done on
+ * the ground for a rejected plan. correctiveActionTypeId is optional.
  */
 export async function rejectTicket(
   {
@@ -573,13 +740,12 @@ export async function rejectTicket(
     `
       UPDATE action_tickets
       SET
-        status = 'CLOSED',
+        status = 'PENDING_APPROVAL',
         decision = 'REJECTED',
         comments = $1,
         corrective_action_type_id = $2,
         decided_at = NOW(),
-        closure_date = CURRENT_DATE,
-        closed_at = NOW(),
+        submitted_for_approval_at = NOW(),
         updated_at = NOW()
       WHERE
         id = $3
@@ -599,14 +765,58 @@ export async function rejectTicket(
 }
 
 /**
- * Close an accepted ticket after the work is done on the ground:
- * IN_PROGRESS -> CLOSED.
+ * The HOD's completed work goes to the EHS Officer:
+ * IN_PROGRESS -> PENDING_APPROVAL. The type of work is editable here,
+ * since what was actually done can differ from what was planned
+ * (docs/17, D2/D5).
  */
-export async function closeTicket(
+export async function submitResolution(
   {
     ticketId,
     hodId,
-    completionNotes,
+    resolutionComments,
+    correctiveActionTypeId,
+  },
+  client = databasePool,
+) {
+  const result = await client.query(
+    `
+      UPDATE action_tickets
+      SET
+        status = 'PENDING_APPROVAL',
+        completion_notes = $1,
+        corrective_action_type_id = COALESCE(
+          $2,
+          corrective_action_type_id
+        ),
+        submitted_for_approval_at = NOW(),
+        updated_at = NOW()
+      WHERE
+        id = $3
+        AND action_hod_id = $4
+        AND status = 'IN_PROGRESS'
+      RETURNING id
+    `,
+    [
+      resolutionComments,
+      correctiveActionTypeId,
+      ticketId,
+      hodId,
+    ],
+  );
+
+  return result.rows[0] ?? null;
+}
+
+/**
+ * The EHS Officer closes the ticket: PENDING_APPROVAL -> CLOSED,
+ * keeping whichever decision the HOD recorded.
+ */
+export async function approveTicket(
+  {
+    ticketId,
+    approverId,
+    comments,
   },
   client = databasePool,
 ) {
@@ -617,18 +827,179 @@ export async function closeTicket(
         status = 'CLOSED',
         closure_date = CURRENT_DATE,
         closed_at = NOW(),
-        completion_notes = $1,
+        approved_by = $1,
+        approved_at = NOW(),
+        approval_comments = $2,
         updated_at = NOW()
       WHERE
-        id = $2
-        AND action_hod_id = $3
-        AND status = 'IN_PROGRESS'
+        id = $3
+        AND status = 'PENDING_APPROVAL'
       RETURNING id
     `,
-    [completionNotes, ticketId, hodId],
+    [approverId, comments, ticketId],
   );
 
   return result.rows[0] ?? null;
+}
+
+/**
+ * The EHS Officer sends the ticket back: PENDING_APPROVAL -> OPEN with
+ * everything the HOD recorded cleared, so they look at it again
+ * (docs/17, D6). The plan snapshot is kept: it is what the ticket is
+ * for. Evidence rows are deleted by the caller in the same transaction.
+ */
+export async function reopenTicket(
+  {
+    ticketId,
+    approverId,
+    comments,
+  },
+  client = databasePool,
+) {
+  const result = await client.query(
+    `
+      UPDATE action_tickets
+      SET
+        status = 'OPEN',
+        decision = NULL,
+        comments = NULL,
+        corrective_action_type_id = NULL,
+        completion_notes = NULL,
+        decided_at = NULL,
+        submitted_for_approval_at = NULL,
+        closure_date = NULL,
+        closed_at = NULL,
+        approved_by = $1,
+        approved_at = NULL,
+        approval_comments = NULL,
+        reopen_comments = $2,
+        reopened_at = NOW(),
+        reopen_count = reopen_count + 1,
+        updated_at = NOW()
+      WHERE
+        id = $3
+        AND status = 'PENDING_APPROVAL'
+      RETURNING id
+    `,
+    [approverId, comments, ticketId],
+  );
+
+  return result.rows[0] ?? null;
+}
+
+/**
+ * Removes every evidence row for a ticket, returning the file paths so
+ * the caller can unlink them once the transaction has committed.
+ */
+export async function deleteEvidenceForTicket(
+  ticketId,
+  client = databasePool,
+) {
+  const result = await client.query(
+    `
+      DELETE FROM action_ticket_evidence
+      WHERE ticket_id = $1
+      RETURNING file_path
+    `,
+    [ticketId],
+  );
+
+  return result.rows.map(
+    (row) => row.file_path,
+  );
+}
+
+/**
+ * Every ticket assigned to this HOD in the last six months, for the
+ * History tab (docs/17, D8).
+ */
+export async function findTicketHistoryForHod(
+  {
+    hodId,
+    fromDate,
+    filter,
+  },
+  client = databasePool,
+) {
+  const statusClause =
+    filter && filter !== "all"
+      ? "AND ticket.status = $3"
+      : "";
+
+  const parameters = [hodId, fromDate];
+
+  if (statusClause) {
+    parameters.push(
+      String(filter).toUpperCase(),
+    );
+  }
+
+  const result = await client.query(
+    `
+      ${TICKET_SELECT}
+      WHERE
+        ticket.action_hod_id = $1
+        AND ticket.assigned_at >= $2::DATE
+        ${statusClause}
+      ORDER BY
+        ticket.assigned_at DESC,
+        ticket.id DESC
+      LIMIT 300
+    `,
+    parameters,
+  );
+
+  return result.rows.map(mapTicket);
+}
+
+/**
+ * Every ticket waiting on this approver's decision.
+ */
+export async function findTicketsPendingApproval(
+  {
+    userId,
+  },
+  client = databasePool,
+) {
+  const result = await client.query(
+    `
+      ${TICKET_SELECT}
+      WHERE
+        ticket.status = 'PENDING_APPROVAL'
+        AND ${TICKET_APPROVER_PREDICATE}
+      ORDER BY
+        ticket.submitted_for_approval_at,
+        ticket.id
+    `,
+    [userId],
+  );
+
+  return result.rows.map(mapTicket);
+}
+
+/**
+ * One ticket, readable and writable by an approver.
+ */
+export async function findTicketByIdForApprover(
+  {
+    ticketId,
+    userId,
+    forUpdate = false,
+  },
+  client = databasePool,
+) {
+  const result = await client.query(
+    `
+      ${TICKET_SELECT}
+      WHERE
+        ticket.id = $2
+        AND ${TICKET_APPROVER_PREDICATE}
+      ${forUpdate ? "FOR UPDATE OF ticket" : ""}
+    `,
+    [userId, ticketId],
+  );
+
+  return mapTicket(result.rows[0]);
 }
 
 export async function findActiveCorrectiveActionTypes(
