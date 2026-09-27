@@ -26,7 +26,7 @@ const FILLS = {
   done: "FFD1FADF",
   missed: "FFFEE4E2",
   notScheduled: "FFF2F4F7",
-  header: "FF087F5B",
+  header: "FF101828",
 };
 
 const FONT_COLOURS = {

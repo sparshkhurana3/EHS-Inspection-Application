@@ -183,7 +183,7 @@ async function writeXlsx(zones) {
   headerRow.fill = {
     type: "pattern",
     pattern: "solid",
-    fgColor: { argb: "FF087F5B" },
+    fgColor: { argb: "FF101828" },
   };
   headerRow.alignment = { vertical: "middle" };
   headerRow.height = 22;

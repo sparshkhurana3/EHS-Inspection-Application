@@ -25,6 +25,36 @@ const EMPTY_MESSAGES = {
     "No report is still in progress from the last six months.",
 };
 
+/*
+ * The lifecycle chip used to render every state in one colour, so a
+ * report sent back for re-examination looked the same as one closed and
+ * approved. The modifier classes already existed; this is what picks
+ * between them, so the colour carries the state rather than decorating
+ * it.
+ */
+const LIFECYCLE_CHIP_MODIFIERS = {
+  NO_OBSERVATIONS: "weekly-status-closed",
+  CLOSED_VIA_CLOSURE: "weekly-status-closed",
+  EHS_OFFICER_ACTION_REQUIRED:
+    "weekly-status-action-required",
+  REEXAMINATION_REQUIRED:
+    "weekly-status-action-required",
+  ACTION_PLAN_IN_PROGRESS:
+    "weekly-status-in-progress",
+  WITH_AUDITEE: "weekly-status-with-auditee",
+};
+
+function getLifecycleChipClassName(report) {
+  const modifier =
+    LIFECYCLE_CHIP_MODIFIERS[
+      report.lifecycleStatus
+    ];
+
+  return modifier
+    ? `weekly-status ${modifier}`
+    : "weekly-status";
+}
+
 function describeCount(report) {
   if (report.noObservations) {
     return "None";
@@ -152,7 +182,11 @@ export default function ObservationHistory({
                     </span>
 
                     <span data-label="Status">
-                      <span className="weekly-status">
+                      <span
+                        className={getLifecycleChipClassName(
+                          report,
+                        )}
+                      >
                         {report.lifecycleLabel}
                       </span>
                     </span>
