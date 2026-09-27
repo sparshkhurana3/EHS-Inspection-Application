@@ -16,11 +16,11 @@ Reference documentation for humans and for Claude Code sessions. `CLAUDE.md` at 
 | 10 | [Observations page plan](10-observations-page-plan.md) | Implementing the weekly pending list and the submitted-report detail view |
 | 11 | [Closure page plan](11-closure-page-plan.md) | Implementing the pending list, the EHS approval loop, and the completed detail view |
 | 12 | [Plan page plan](12-plan-page-plan.md) | Implementing role-gated, location-scoped audit scheduling for the EHS Officer |
-| 13 | [Action ticket plan](13-action-ticket-plan.md) | Implementing the `ACTION_HOD` role, the auditee → Action HOD assignment, and the ticket page with evidence uploads |
 | 14 | [Weekly roster plan](14-weekly-roster-plan.md) | Implementing the roster file upload, automatic Monday scheduling to 31 December, the officer's week card, and propagated auditor/auditee edits |
 | 15 | [Observations refinement plan](15-observations-refinement-plan.md) | Implementing up to 10 observations per report, "No observation to record", the Thursday deadline, and the six-month history with the closed-via-ticket filter |
-| 16 | [Closure refinement plan](16-closure-refinement-plan.md) | One action plan and ticket per observation, and the Open / In Progress / Closed closure status derived from ticket outcomes |
-| 17 | [Ticket refinement plan](17-ticket-refinement-plan.md) | Departments mapped to Action Team HODs, EHS Officer approval or reopen of every ticket outcome, and the HOD's six-month history tab |
+| 16 | [Closure refinement plan](16-closure-refinement-plan.md) | One action plan per observation. **Historical**: its ticket-driven status machine was superseded by 19 |
+| 19 | [Removing the ticket system](19-remove-tickets-plan.md) | The current closure workflow: the auditee carries out the action and evidences it, and the EHS Officer's approval ends the inspection |
+| 18 | [Entra ID single sign-on](18-entra-sso-plan.md) | Microsoft Entra ID as the primary authentication and authorization source, with password sign-in kept as a failsafe. Administrator setup is in [`guide.md`](../guide.md) |
 | 10 | [Schema migration plan](10-schema-migration-plan.md) | Implementing the `users` / `zone_audits` / `observations` schema and reworking backend + frontend wiring to match |
 
 ## Maintaining these docs

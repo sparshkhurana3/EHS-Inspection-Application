@@ -233,10 +233,10 @@ export async function getObservationItemPhotograph({
 }
 
 /*
- * Reads the closure/ticket status off either shape the repository
- * returns: the flat closureStatus/ticketStatus fields carried by the
- * weekly-assignments and history rows, or the nested closure/ticket
- * objects findReportByIdForUser builds.
+ * Reads the closure status off either shape the repository returns:
+ * the flat closureStatus field carried by the weekly-assignments and
+ * history rows, or the nested closure object findReportByIdForUser
+ * builds.
  */
 function resolveLifecycleInputs(
   report,
@@ -246,52 +246,24 @@ function resolveLifecycleInputs(
       report.closureStatus ??
       report.closure?.status ??
       null,
-
-    ticketStatus:
-      report.ticketStatus ??
-      report.ticket?.status ??
-      null,
-
-    ticketDecision:
-      report.ticketDecision ??
-      report.ticket?.decision ??
-      null,
   };
 }
 
 /*
- * A ticket closed on this report's closure always means "closed via
- * ticket", even if the closure itself was later approved: the ticket
- * outcome is the fact that answers "was the plan implemented or
- * rejected", which is what this label is for.
+ * How far a filed report has travelled. The journey used to run through
+ * an action ticket; it now ends at the EHS Officer's approval of the
+ * auditee's closure, which is the only thing that closes a report with
+ * observations on it.
  */
 function computeLifecycle({
   noObservations,
   closureStatus,
-  ticketStatus,
-  ticketDecision,
 }) {
   if (noObservations) {
     return {
       lifecycleStatus: "NO_OBSERVATIONS",
       lifecycleLabel:
         "Closed – no observations",
-    };
-  }
-
-  if (
-    String(ticketStatus ?? "")
-      .toUpperCase() === "CLOSED"
-  ) {
-    return {
-      lifecycleStatus:
-        "CLOSED_VIA_TICKET",
-
-      lifecycleLabel:
-        String(ticketDecision ?? "")
-          .toUpperCase() === "REJECTED"
-          ? "Closed – plan rejected"
-          : "Closed – action implemented",
     };
   }
 
@@ -311,11 +283,27 @@ function computeLifecycle({
     };
   }
 
+  /*
+   * The officer's approval is what closes a report that had findings on
+   * it, so this is the terminal state rather than a staging post.
+   */
   if (normalizedClosureStatus === "APPROVED") {
     return {
-      lifecycleStatus: "APPROVED",
+      lifecycleStatus: "CLOSED_VIA_CLOSURE",
       lifecycleLabel:
-        "Approved by EHS Officer",
+        "Closed – approved by EHS Officer",
+    };
+  }
+
+  if (
+    normalizedClosureStatus ===
+    "REEXAMINATION_REQUIRED"
+  ) {
+    return {
+      lifecycleStatus:
+        "REEXAMINATION_REQUIRED",
+      lifecycleLabel:
+        "Sent back for re-examination",
     };
   }
 
@@ -326,7 +314,7 @@ function computeLifecycle({
       lifecycleStatus:
         "ACTION_PLAN_IN_PROGRESS",
       lifecycleLabel:
-        "Action plan being implemented",
+        "Action plan being prepared",
     };
   }
 
@@ -340,7 +328,7 @@ function computeLifecycle({
  * From the auditor's point of view a report is Open (nothing filed) or
  * Closed (filed and sent to the auditee, or closed with no observation
  * to record). `lifecycleStatus`/`lifecycleLabel` carry the fuller
- * downstream journey (closure, ticket) for views that want it; the
+ * downstream journey through the closure for views that want it; the
  * stored `status` column itself is passed through unchanged.
  */
 function createReportResponse(report) {
@@ -351,11 +339,8 @@ function createReportResponse(report) {
   const noObservations =
     report.noObservations === true;
 
-  const {
-    closureStatus,
-    ticketStatus,
-    ticketDecision,
-  } = resolveLifecycleInputs(report);
+  const { closureStatus } =
+    resolveLifecycleInputs(report);
 
   const {
     lifecycleStatus,
@@ -363,8 +348,6 @@ function createReportResponse(report) {
   } = computeLifecycle({
     noObservations,
     closureStatus,
-    ticketStatus,
-    ticketDecision,
   });
 
   const closure =
@@ -373,18 +356,6 @@ function createReportResponse(report) {
       ? {
           id: report.closureId,
           status: report.closureStatus,
-        }
-      : null);
-
-  const ticket =
-    report.ticket ??
-    (report.ticketId
-      ? {
-          id: report.ticketId,
-          status: report.ticketStatus,
-          decision: report.ticketDecision,
-          closureDate:
-            report.ticketClosureDate,
         }
       : null);
 
@@ -402,7 +373,6 @@ function createReportResponse(report) {
       : "Closed – sent to auditee",
 
     closure,
-    ticket,
 
     lifecycleStatus,
     lifecycleLabel,

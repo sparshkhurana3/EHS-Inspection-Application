@@ -2,11 +2,17 @@ import * as closureRepository
   from "./closure.repository.js";
 
 /*
- * Lives in its own module, depending only on the repository, because
- * both closure.service.js and ticket.service.js need it: the ticket
- * service recomputes the closure's status when a department accepts,
- * rejects or closes a ticket, and closure.service.js already imports
- * ticket.service.js, so importing it the other way round would cycle.
+ * Where a closure's status comes from.
+ *
+ * It used to be derived from the action tickets raised against each
+ * observation. With the tickets gone and the auditee responsible for
+ * carrying the work out themselves, the only thing that moves a closure
+ * forward is whether every observation has an action plan written
+ * against it.
+ *
+ * The module stays separate from closure.service.js so the derivation
+ * can be read on its own, and so it keeps depending on nothing but the
+ * repository.
  */
 
 const READY_FOR_SUBMISSION =
@@ -36,16 +42,20 @@ function hasPlan(item) {
 }
 
 /**
- * The closure's status as the spec defines it, from its observations
- * and their latest tickets (docs/16-closure-refinement-plan.md, D5):
+ * The closure's status, from its observations alone:
  *
- * - Open: any observation still has no action plan, or has one that no
- *   department has taken up yet (its ticket is missing or still OPEN).
- * - In Progress: every observation's plan is with a department and at
- *   least one is still being worked.
- * - Every ticket resolved: returns the READY_FOR_SUBMISSION sentinel,
- *   which the caller maps, because "closed" additionally needs the EHS
- *   Officer's approval (D6).
+ * - Open: at least one observation still has no action plan. A closure
+ *   whose report carries no observations is Open too — there is
+ *   nothing to have planned, and it should not look finished.
+ * - Otherwise every observation is planned, and the closure is ready to
+ *   go to the EHS Officer. That returns the READY_FOR_SUBMISSION
+ *   sentinel rather than a stored status, because being ready is not
+ *   the same as having been sent: the caller maps it to IN_PROGRESS and
+ *   the auditee still has to submit.
+ *
+ * Evidence photographs deliberately do not gate this. They are optional
+ * supporting material, and the EHS Officer can send a closure back if
+ * what was attached does not convince them.
  */
 export function deriveClosureStatus(items) {
   if (
@@ -59,33 +69,12 @@ export function deriveClosureStatus(items) {
     return "OPEN";
   }
 
-  const everyTicketTakenUp = items.every(
-    (item) =>
-      item.ticket &&
-      normalizeStatus(item.ticket.status) !==
-        "OPEN",
-  );
-
-  if (!everyTicketTakenUp) {
-    return "OPEN";
-  }
-
-  const everyTicketClosed = items.every(
-    (item) =>
-      normalizeStatus(item.ticket.status) ===
-      "CLOSED",
-  );
-
-  if (!everyTicketClosed) {
-    return "IN_PROGRESS";
-  }
-
   return READY_FOR_SUBMISSION;
 }
 
 /**
- * True when every observation has a plan and every ticket has been
- * resolved, so the auditee may send the closure for approval.
+ * True when every observation has an action plan, so the auditee may
+ * send the closure for approval.
  */
 export function isReadyForSubmission(items) {
   return (
@@ -95,8 +84,8 @@ export function isReadyForSubmission(items) {
 }
 
 /**
- * Recomputes and stores the closure's status after an item or a ticket
- * changed. Returns the status the closure now holds.
+ * Recomputes and stores the closure's status after an item changed.
+ * Returns the status the closure now holds.
  */
 export async function recomputeClosureStatus(
   closureId,
@@ -120,8 +109,7 @@ export async function recomputeClosureStatus(
 
   /*
    * Once the closure is with the EHS Officer (or already decided), its
-   * status is theirs to move; a late ticket event must not drag it
-   * backwards.
+   * status is theirs to move; a late edit must not drag it backwards.
    */
   if (
     REVIEW_OWNED_STATUSES.has(
@@ -135,8 +123,9 @@ export async function recomputeClosureStatus(
     deriveClosureStatus(items);
 
   /*
-   * Every ticket resolved means "ready to submit", not "submitted":
-   * the closure waits in IN_PROGRESS for the auditee to send it.
+   * Every observation planned means "ready to submit", not
+   * "submitted": the closure waits in IN_PROGRESS for the auditee to
+   * send it.
    */
   const nextStatus =
     derived === READY_FOR_SUBMISSION

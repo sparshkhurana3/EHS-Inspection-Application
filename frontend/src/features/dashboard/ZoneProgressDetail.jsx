@@ -8,7 +8,7 @@ import ClosureItemSummary from "../closures/ClosureItemSummary.jsx";
 
 /**
  * Everything filed against one zone's audit so far: the observation
- * report, the action plan, and the Action Team HOD's ticket. Read-only
+ * report, the action plan, and its evidence. Read-only
  * — this is the EHS Officer reviewing progress, not acting on it, so it
  * reuses the same display components the auditee and the HOD see
  * rather than a new edit form.
@@ -61,6 +61,7 @@ export default function ZoneProgressDetail({
         closure.items.map((item) => (
           <ClosureItemSummary
             key={item.id}
+            closureId={closure.id}
             item={item}
             total={closure.items.length}
           />

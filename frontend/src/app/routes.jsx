@@ -8,19 +8,18 @@ import AppLayout from "../layouts/AppLayout.jsx";
 
 import HomePage from "../features/auth/HomePage.jsx";
 import LoginPage from "../features/auth/LoginPage.jsx";
+import EntraCallbackPage from "../features/auth/EntraCallbackPage.jsx";
 import SignupPage from "../features/auth/SignupPage.jsx";
 
 import DashboardPage from "../features/dashboard/DashboardPage.jsx";
 import ObservationPage from "../features/observations/ObservationPage.jsx";
 import ClosurePage from "../features/closures/ClosurePage.jsx";
 import PlanningPage from "../features/patrols/PlanningPage.jsx";
-import TicketPage from "../features/tickets/TicketPage.jsx";
 
 import RequireRole from "./RequireRole.jsx";
 
 import {
   PLANNING_ROLES,
-  TICKET_ROLES,
 } from "../constants/roles.js";
 
 export default function AppRoutes() {
@@ -41,23 +40,21 @@ export default function AppRoutes() {
         element={<SignupPage />}
       />
 
+      {/*
+        * Public by necessity: this is where Microsoft sends the browser
+        * back to, and at that point there is no session yet. It carries
+        * a one-time code which it trades for one.
+        */}
+      <Route
+        path="/auth/entra/callback"
+        element={<EntraCallbackPage />}
+      />
+
       {/* All authenticated pages use AppLayout */}
       <Route element={<AppLayout />}>
-        {/*
-          * The Action Team HOD's only page is Ticket; the ordinary
-          * workflow pages are off limits to them, the same as Plan is
-          * off limits to everyone else below.
-          */}
         <Route
           path="/dashboard"
-          element={
-            <RequireRole
-              deny={TICKET_ROLES}
-              redirectTo="/tickets"
-            >
-              <DashboardPage />
-            </RequireRole>
-          }
+          element={<DashboardPage />}
         />
 
         <Route
@@ -72,26 +69,12 @@ export default function AppRoutes() {
 
         <Route
           path="/observations"
-          element={
-            <RequireRole
-              deny={TICKET_ROLES}
-              redirectTo="/tickets"
-            >
-              <ObservationPage />
-            </RequireRole>
-          }
+          element={<ObservationPage />}
         />
 
         <Route
           path="/closures"
-          element={
-            <RequireRole
-              deny={TICKET_ROLES}
-              redirectTo="/tickets"
-            >
-              <ClosurePage />
-            </RequireRole>
-          }
+          element={<ClosurePage />}
         />
 
         {/* Planning is EHS Officer work; the API enforces it too. */}
@@ -100,15 +83,6 @@ export default function AppRoutes() {
           element={
             <RequireRole roles={PLANNING_ROLES}>
               <PlanningPage />
-            </RequireRole>
-          }
-        />
-
-        <Route
-          path="/tickets"
-          element={
-            <RequireRole roles={TICKET_ROLES}>
-              <TicketPage />
             </RequireRole>
           }
         />

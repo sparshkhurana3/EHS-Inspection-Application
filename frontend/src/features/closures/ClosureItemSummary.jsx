@@ -1,6 +1,6 @@
 import { formatDate } from "../../lib/errorMessage.js";
 
-import TicketStatusCard from "../tickets/TicketStatusCard.jsx";
+import ClosureEvidencePanel from "./ClosureEvidencePanel.jsx";
 
 function Field({ label, value }) {
   return (
@@ -12,12 +12,13 @@ function Field({ label, value }) {
 }
 
 /**
- * Read-only view of one observation's action plan and the ticket the
- * department is working on it. Used by the EHS Officer's approval panel
+ * Read-only view of one observation's action plan and the evidence
+ * attached to it. Used by the EHS Officer's approval panel
  * and the officer's zone progress view, which both show the closure
  * without editing it.
  */
 export default function ClosureItemSummary({
+  closureId,
   item,
   total,
 }) {
@@ -43,30 +44,14 @@ export default function ClosureItemSummary({
           </p>
         </div>
 
-        {item.ticketDisplayStatus ? (
-          <span
-            className={`closure-status-chip ticket-status-${String(
-              item.ticket?.status ?? "",
-            ).toLowerCase()}`}
-          >
-            Ticket: {item.ticketDisplayStatus}
-          </span>
-        ) : null}
+        <span className="closure-status-chip">
+          {item.actionPlan
+            ? "Action plan saved"
+            : "No action plan"}
+        </span>
       </header>
 
       <div className="closure-detail-grid">
-        <Field
-          label="Assigned to"
-          value={
-            item.departmentName
-              ? `${item.departmentName}${
-                  item.actionHodName
-                    ? ` — ${item.actionHodName}`
-                    : ""
-                }`
-              : item.actionHodName
-          }
-        />
         <Field
           label="Target date"
           value={formatDate(item.targetDate)}
@@ -76,6 +61,18 @@ export default function ClosureItemSummary({
           value={formatDate(
             item.actionPlanSavedAt,
           )}
+        />
+        <Field
+          label="Evidence"
+          value={
+            item.evidenceCount
+              ? `${item.evidenceCount} photograph${
+                  item.evidenceCount === 1
+                    ? ""
+                    : "s"
+                }`
+              : "None attached"
+          }
         />
       </div>
 
@@ -95,7 +92,15 @@ export default function ClosureItemSummary({
         </p>
       </div>
 
-      <TicketStatusCard ticket={item.ticket} />
+      {/*
+        * Read-only here: this is the officer's view of what the
+        * auditee attached, not a place to change it.
+        */}
+      <ClosureEvidencePanel
+        closureId={closureId}
+        item={item}
+        editable={false}
+      />
     </section>
   );
 }

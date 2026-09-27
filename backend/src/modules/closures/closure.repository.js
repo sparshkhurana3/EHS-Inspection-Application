@@ -85,33 +85,6 @@ function mapClosure(row) {
     targetDate:
       row.target_date,
 
-    responsibleHodName:
-      row.responsible_hod_name,
-
-    /*
-     * Which registered user the plan is assigned to, and the ticket
-     * opened for them. Both nullable: a closure whose plan has never
-     * been saved has neither, and a closure saved before this feature
-     * shipped has a name but no id or ticket.
-     */
-    actionHodId:
-      row.action_hod_id ?? null,
-
-    actionHodName:
-      row.action_hod_name ?? null,
-
-    ticketId:
-      row.ticket_id ?? null,
-
-    ticketStatus:
-      row.ticket_status ?? null,
-
-    ticketDecision:
-      row.ticket_decision ?? null,
-
-    ticketClosureDate:
-      row.ticket_closure_date ?? null,
-
     completionDate:
       row.completion_date,
 
@@ -165,10 +138,29 @@ function mapClosure(row) {
       row.observations ?? [],
 
     /*
-     * One action plan per observation (docs/16, D1). The flat
-     * actionPlan/targetDate/actionHodName fields above mirror item #1.
+     * One action plan per observation, each with its own evidence
+     * photographs. The flat actionPlan/targetDate fields above mirror
+     * item #1.
      */
     items: row.items ?? [],
+  };
+}
+
+function mapEvidence(row) {
+  if (!row) {
+    return null;
+  }
+
+  return {
+    id: row.id,
+    closureItemId: row.closure_item_id,
+    filePath: row.file_path,
+    originalName: row.original_name,
+    mimeType: row.mime_type,
+    size: row.size === null
+      ? null
+      : Number(row.size),
+    uploadedAt: row.uploaded_at,
   };
 }
 
@@ -198,9 +190,6 @@ const CLOSURE_SELECT = `
     closure_request.requested_at,
     closure_request.action_plan,
     closure_request.target_date,
-    closure_request.responsible_hod_name,
-    closure_request.action_hod_id,
-    action_hod.full_name AS action_hod_name,
     closure_request.completion_date,
     closure_request.action_plan_saved_at,
     closure_request.submitted_for_closure_at,
@@ -231,9 +220,9 @@ const CLOSURE_SELECT = `
     observation_report.no_observations,
 
     /*
-     * One entry per observation: its own action plan, the department it
-     * is assigned to, and the latest ticket raised for it
-     * (docs/16-closure-refinement-plan.md, D1/D3).
+     * One entry per observation: its own action plan and the
+     * photographs the auditee attached as evidence that the plan was
+     * carried out.
      */
     COALESCE((
       SELECT JSON_AGG(
@@ -242,13 +231,6 @@ const CLOSURE_SELECT = `
           'sequenceNumber', closure_item.sequence_number,
           'actionPlan', closure_item.action_plan,
           'targetDate', closure_item.target_date,
-          'actionHodId', closure_item.action_hod_id,
-          'actionHodName', COALESCE(
-            item_hod.full_name,
-            closure_item.responsible_hod_name
-          ),
-          'departmentId', closure_item.department_id,
-          'departmentName', item_department.name,
           'actionPlanSavedAt',
             closure_item.action_plan_saved_at,
           'observation', JSON_BUILD_OBJECT(
@@ -259,16 +241,21 @@ const CLOSURE_SELECT = `
             'riskCategory',
               item_observation.risk_category
           ),
-          'ticket', CASE
-            WHEN item_ticket.id IS NULL THEN NULL
-            ELSE JSON_BUILD_OBJECT(
-              'id', item_ticket.id,
-              'status', item_ticket.status,
-              'decision', item_ticket.decision,
-              'closureRound', item_ticket.closure_round,
-              'closureDate', item_ticket.closure_date
+          'evidence', COALESCE((
+            SELECT JSON_AGG(
+              JSON_BUILD_OBJECT(
+                'id', evidence.id,
+                'originalName', evidence.original_name,
+                'mimeType', evidence.mime_type,
+                'size', evidence.size,
+                'uploadedAt', evidence.uploaded_at
+              )
+              ORDER BY evidence.uploaded_at, evidence.id
             )
-          END
+            FROM closure_item_evidence AS evidence
+            WHERE evidence.closure_item_id =
+              closure_item.id
+          ), '[]'::JSON)
         )
         ORDER BY closure_item.sequence_number
       )
@@ -279,22 +266,6 @@ const CLOSURE_SELECT = `
       LEFT JOIN zone_areas AS item_area
         ON item_area.id =
            item_observation.zone_area_id
-      LEFT JOIN users AS item_hod
-        ON item_hod.id = closure_item.action_hod_id
-      LEFT JOIN departments AS item_department
-        ON item_department.id = closure_item.department_id
-      LEFT JOIN LATERAL (
-        SELECT
-          ticket.id,
-          ticket.status,
-          ticket.decision,
-          ticket.closure_round,
-          ticket.closure_date
-        FROM action_tickets AS ticket
-        WHERE ticket.closure_item_id = closure_item.id
-        ORDER BY ticket.closure_round DESC
-        LIMIT 1
-      ) AS item_ticket ON TRUE
       WHERE closure_item.closure_request_id =
         closure_request.id
     ), '[]'::JSON) AS items,
@@ -337,12 +308,7 @@ const CLOSURE_SELECT = `
       AS auditee_name,
 
     ehs_officer.full_name
-      AS ehs_officer_name,
-
-    latest_ticket.id AS ticket_id,
-    latest_ticket.status AS ticket_status,
-    latest_ticket.decision AS ticket_decision,
-    latest_ticket.closure_date AS ticket_closure_date
+      AS ehs_officer_name
 
   FROM closure_requests
     AS closure_request
@@ -379,30 +345,8 @@ const CLOSURE_SELECT = `
   LEFT JOIN users AS reviewer
     ON reviewer.id = closure_request.reviewed_by
 
-  LEFT JOIN users AS action_hod
-    ON action_hod.id = closure_request.action_hod_id
-
   LEFT JOIN zone_areas AS report_area
     ON report_area.id = observation_report.zone_area_id
-
-  /*
-   * The most recent ticket for this closure (there is at most one per
-   * approval round; a rejected-and-resubmitted plan opens a new round
-   * and a new ticket, and the latest one is what the closure views
-   * should show).
-   */
-  LEFT JOIN LATERAL (
-    SELECT
-      ticket.id,
-      ticket.status,
-      ticket.decision,
-      ticket.closure_date,
-      ticket.closure_round
-    FROM action_tickets AS ticket
-    WHERE ticket.closure_request_id = closure_request.id
-    ORDER BY ticket.closure_round DESC
-    LIMIT 1
-  ) AS latest_ticket ON TRUE
 `;
 
 /**
@@ -564,7 +508,6 @@ export async function findClosureByIdForUser(
         closure_request.id = $1
         AND (
           closure_request.requested_by = $2
-          OR closure_request.action_hod_id = $2
           OR patrol.auditor_id = $2
           OR patrol.auditee_id = $2
           OR patrol.ehs_officer_id = $2
@@ -652,8 +595,8 @@ export async function lockClosureForUpdate(
 }
 
 /**
- * Every observation of one closure with its own plan and latest
- * ticket. The same shape the CLOSURE_SELECT aggregate builds, for the
+ * Every observation of one closure with its own plan and evidence.
+ * The same shape the CLOSURE_SELECT aggregate builds, for the
  * write path, which needs it without re-running the whole query.
  */
 export async function findClosureItems(
@@ -667,11 +610,7 @@ export async function findClosureItems(
         closure_item.sequence_number,
         closure_item.action_plan,
         closure_item.target_date,
-        closure_item.action_hod_id,
-        closure_item.responsible_hod_name,
         closure_item.action_plan_saved_at,
-        closure_item.department_id,
-        item_department.name AS department_name,
 
         item_observation.id AS observation_item_id,
         item_observation.category,
@@ -679,15 +618,20 @@ export async function findClosureItems(
         item_observation.risk_category,
         item_area.name AS area_name,
 
-        item_hod.full_name AS action_hod_name,
-
-        item_ticket.id AS ticket_id,
-        item_ticket.status AS ticket_status,
-        item_ticket.decision AS ticket_decision,
-        item_ticket.closure_round
-          AS ticket_closure_round,
-        item_ticket.closure_date
-          AS ticket_closure_date
+        COALESCE((
+          SELECT JSON_AGG(
+            JSON_BUILD_OBJECT(
+              'id', evidence.id,
+              'originalName', evidence.original_name,
+              'mimeType', evidence.mime_type,
+              'size', evidence.size,
+              'uploadedAt', evidence.uploaded_at
+            )
+            ORDER BY evidence.uploaded_at, evidence.id
+          )
+          FROM closure_item_evidence AS evidence
+          WHERE evidence.closure_item_id = closure_item.id
+        ), '[]'::JSON) AS evidence
 
       FROM closure_items AS closure_item
 
@@ -698,25 +642,6 @@ export async function findClosureItems(
       LEFT JOIN zone_areas AS item_area
         ON item_area.id =
            item_observation.zone_area_id
-
-      LEFT JOIN users AS item_hod
-        ON item_hod.id = closure_item.action_hod_id
-
-      LEFT JOIN departments AS item_department
-        ON item_department.id = closure_item.department_id
-
-      LEFT JOIN LATERAL (
-        SELECT
-          ticket.id,
-          ticket.status,
-          ticket.decision,
-          ticket.closure_round,
-          ticket.closure_date
-        FROM action_tickets AS ticket
-        WHERE ticket.closure_item_id = closure_item.id
-        ORDER BY ticket.closure_round DESC
-        LIMIT 1
-      ) AS item_ticket ON TRUE
 
       WHERE closure_item.closure_request_id = $1
 
@@ -732,13 +657,6 @@ export async function findClosureItems(
     ),
     actionPlan: row.action_plan,
     targetDate: row.target_date,
-    actionHodId: row.action_hod_id,
-    actionHodName:
-      row.action_hod_name ??
-      row.responsible_hod_name,
-    departmentId: row.department_id ?? null,
-    departmentName:
-      row.department_name ?? null,
     actionPlanSavedAt:
       row.action_plan_saved_at,
 
@@ -750,18 +668,7 @@ export async function findClosureItems(
       riskCategory: row.risk_category,
     },
 
-    ticket: row.ticket_id
-      ? {
-          id: row.ticket_id,
-          status: row.ticket_status,
-          decision: row.ticket_decision,
-          closureRound: Number(
-            row.ticket_closure_round ?? 0,
-          ),
-          closureDate:
-            row.ticket_closure_date,
-        }
-      : null,
+    evidence: row.evidence ?? [],
   }));
 }
 
@@ -783,8 +690,7 @@ export async function findClosureStatus(
 
 /**
  * Saves one observation's action plan. The closure's own status is not
- * touched here: it is derived from every item and its ticket
- * afterwards (docs/16, D5).
+ * touched here: it is derived from every item afterwards.
  */
 export async function saveClosureItem(
   {
@@ -792,9 +698,6 @@ export async function saveClosureItem(
     closureItemId,
     actionPlan,
     targetDate,
-    responsibleHodName,
-    actionHodId,
-    departmentId,
   },
   client = databasePool,
 ) {
@@ -804,32 +707,24 @@ export async function saveClosureItem(
       SET
         action_plan = $1,
         target_date = $2::DATE,
-        responsible_hod_name = $3,
-        action_hod_id = $4,
-        department_id = $7,
         action_plan_saved_at = NOW(),
         updated_at = NOW()
       WHERE
-        id = $5
-        AND closure_request_id = $6
+        id = $3
+        AND closure_request_id = $4
       RETURNING
         id,
         closure_request_id,
         observation_item_id,
         sequence_number,
         action_plan,
-        target_date,
-        responsible_hod_name,
-        action_hod_id
+        target_date
     `,
     [
       actionPlan,
       targetDate,
-      responsibleHodName,
-      actionHodId,
       closureItemId,
       closureId,
-      departmentId,
     ],
   );
 
@@ -850,9 +745,6 @@ export async function syncClosureHeaderFromItemOne(
       SET
         action_plan = closure_item.action_plan,
         target_date = closure_item.target_date,
-        responsible_hod_name =
-          closure_item.responsible_hod_name,
-        action_hod_id = closure_item.action_hod_id,
         action_plan_saved_at =
           closure_item.action_plan_saved_at,
         updated_at = NOW()
@@ -890,197 +782,152 @@ export async function updateClosureStatus(
 }
 
 /**
- * The plant this closure's patrol belongs to, independent of whether
- * any Action Team HOD is registered there yet. Kept separate from
- * findActionHodsForClosure below, whose inner join to hod_user would
- * otherwise return zero rows (and no plant name) when the location has
- * no HOD registered.
+ * The photographs attached to one observation's action plan as
+ * evidence that it was carried out.
  */
-export async function findPlantNameForClosure(
-  {
-    closureId,
-    auditeeId,
-  },
+export async function findClosureItemEvidence(
+  closureItemId,
   client = databasePool,
 ) {
   const result = await client.query(
     `
-      SELECT target_plant.name AS plant_name
-
-      FROM closure_requests AS closure_request
-
-      JOIN patrols AS patrol
-        ON patrol.id = closure_request.patrol_id
-
-      JOIN units AS patrol_unit
-        ON patrol_unit.id = patrol.unit_id
-
-      JOIN plants AS target_plant
-        ON target_plant.id = patrol_unit.plant_id
-
-      WHERE
-        closure_request.id = $1
-        AND closure_request.requested_by = $2
-
-      LIMIT 1
-    `,
-    [closureId, auditeeId],
-  );
-
-  return result.rows[0]?.plant_name ?? null;
-}
-
-/**
- * Active ACTION_HOD users at the same plant as this closure's patrol,
- * for the auditee's assignment dropdown. Scoped to a closure this
- * auditee owns, the same location rule as the auditor/auditee dropdowns
- * on the Plan page.
- */
-/**
- * Departments at this closure's plant that have at least one active
- * Action Team HOD, each with the HOD the ticket will be assigned to
- * (the first by name when a department has several)
- * (docs/17-ticket-refinement-plan.md, D1).
- */
-export async function findDepartmentsForClosure(
-  {
-    closureId,
-    auditeeId,
-  },
-  client = databasePool,
-) {
-  const result = await client.query(
-    `
-      SELECT DISTINCT ON (department.id)
-        department.id,
-        department.name,
-        department.code,
-
-        hod_user.id AS hod_id,
-        hod_user.full_name AS hod_name,
-
-        target_plant.name AS plant_name
-
-      FROM closure_requests AS closure_request
-
-      JOIN patrols AS patrol
-        ON patrol.id = closure_request.patrol_id
-
-      JOIN units AS patrol_unit
-        ON patrol_unit.id = patrol.unit_id
-
-      JOIN plants AS target_plant
-        ON target_plant.id = patrol_unit.plant_id
-
-      JOIN departments AS department
-        ON department.plant_id = patrol_unit.plant_id
-        AND department.is_active = TRUE
-
-      JOIN users AS hod_user
-        ON hod_user.department_id = department.id
-        AND hod_user.is_active = TRUE
-
-      JOIN user_roles AS hod_role_link
-        ON hod_role_link.user_id = hod_user.id
-
-      JOIN roles AS hod_role
-        ON hod_role.id = hod_role_link.role_id
-        AND hod_role.code = 'ACTION_HOD'
-
-      WHERE
-        closure_request.id = $1
-        AND closure_request.requested_by = $2
-
-      ORDER BY
-        department.id,
-        hod_user.full_name,
-        hod_user.username
-    `,
-    [closureId, auditeeId],
-  );
-
-  return result.rows
-    .map((row) => ({
-      id: row.id,
-      name: row.name,
-      code: row.code,
-      hodId: row.hod_id,
-      hodName: row.hod_name,
-      plantName: row.plant_name,
-    }))
-    .sort((left, right) =>
-      String(left.name).localeCompare(
-        String(right.name),
-      ),
-    );
-}
-
-/**
- * Open (or refresh) the ticket for this closure's current approval
- * round. The WHERE on the DO UPDATE means a ticket the HOD has already
- * acted on (status no longer OPEN) is left untouched by a later save;
- * the statement then returns no row, which is not an error.
- */
-export async function upsertTicketForClosureRound(
-  {
-    closureId,
-    closureItemId,
-    observationReportId,
-    patrolId,
-    closureRound,
-    actionHodId,
-    actionHodName,
-    departmentId,
-    proposedActionPlan,
-    targetDate,
-    assignedBy,
-  },
-  client = databasePool,
-) {
-  const result = await client.query(
-    `
-      INSERT INTO action_tickets (
-        closure_request_id,
+      SELECT
+        id,
         closure_item_id,
-        observation_report_id,
-        patrol_id,
-        closure_round,
-        action_hod_id,
-        assigned_by,
-        action_hod_name,
-        proposed_action_plan,
-        target_date,
-        department_id
+        file_path,
+        original_name,
+        mime_type,
+        size,
+        uploaded_at
+      FROM closure_item_evidence
+      WHERE closure_item_id = $1
+      ORDER BY uploaded_at, id
+    `,
+    [closureItemId],
+  );
+
+  return result.rows.map(mapEvidence);
+}
+
+/*
+ * Locked because the three-per-observation limit is checked against
+ * this count and then written just after: without the lock two uploads
+ * arriving together would each see room for one more.
+ */
+export async function countClosureItemEvidenceForUpdate(
+  closureItemId,
+  client,
+) {
+  const result = await client.query(
+    `
+      SELECT id
+      FROM closure_item_evidence
+      WHERE closure_item_id = $1
+      FOR UPDATE
+    `,
+    [closureItemId],
+  );
+
+  return result.rowCount;
+}
+
+export async function insertClosureItemEvidence(
+  {
+    closureItemId,
+    filePath,
+    originalName,
+    mimeType,
+    size,
+    uploadedBy,
+  },
+  client = databasePool,
+) {
+  const result = await client.query(
+    `
+      INSERT INTO closure_item_evidence (
+        closure_item_id,
+        file_path,
+        original_name,
+        mime_type,
+        size,
+        uploaded_by
       )
-      VALUES ($1, $10, $2, $3, $4, $5, $6, $7, $8, $9, $11)
-      ON CONFLICT (closure_item_id, closure_round) DO UPDATE
-      SET
-        action_hod_id = EXCLUDED.action_hod_id,
-        action_hod_name = EXCLUDED.action_hod_name,
-        department_id = EXCLUDED.department_id,
-        proposed_action_plan = EXCLUDED.proposed_action_plan,
-        target_date = EXCLUDED.target_date,
-        assigned_at = NOW(),
-        updated_at = NOW()
-      WHERE action_tickets.status = 'OPEN'
-      RETURNING id, status
+      VALUES ($1, $2, $3, $4, $5, $6)
+      RETURNING
+        id,
+        closure_item_id,
+        file_path,
+        original_name,
+        mime_type,
+        size,
+        uploaded_at
     `,
     [
-      closureId,
-      observationReportId,
-      patrolId,
-      closureRound,
-      actionHodId,
-      assignedBy,
-      actionHodName,
-      proposedActionPlan,
-      targetDate,
       closureItemId,
-      departmentId,
+      filePath,
+      originalName,
+      mimeType,
+      size,
+      uploadedBy,
     ],
   );
 
-  return result.rows[0] ?? null;
+  return mapEvidence(result.rows[0]);
+}
+
+/**
+ * One evidence photograph, with the closure it belongs to, so the
+ * caller can apply the same access rules the closure itself uses.
+ */
+export async function findEvidenceById(
+  evidenceId,
+  client = databasePool,
+) {
+  const result = await client.query(
+    `
+      SELECT
+        evidence.id,
+        evidence.closure_item_id,
+        evidence.file_path,
+        evidence.original_name,
+        evidence.mime_type,
+        evidence.size,
+        evidence.uploaded_at,
+        closure_item.closure_request_id
+      FROM closure_item_evidence AS evidence
+      JOIN closure_items AS closure_item
+        ON closure_item.id = evidence.closure_item_id
+      WHERE evidence.id = $1
+    `,
+    [evidenceId],
+  );
+
+  const row = result.rows[0];
+
+  if (!row) {
+    return null;
+  }
+
+  return {
+    ...mapEvidence(row),
+    closureId: row.closure_request_id,
+  };
+}
+
+export async function deleteEvidenceById(
+  evidenceId,
+  client = databasePool,
+) {
+  const result = await client.query(
+    `
+      DELETE FROM closure_item_evidence
+      WHERE id = $1
+      RETURNING file_path
+    `,
+    [evidenceId],
+  );
+
+  return result.rows[0]?.file_path ?? null;
 }
 
 export async function submitForClosure(
@@ -1106,7 +953,6 @@ export async function submitForClosure(
         AND status = 'IN_PROGRESS'
         AND action_plan IS NOT NULL
         AND target_date IS NOT NULL
-        AND responsible_hod_name IS NOT NULL
 
       RETURNING
         id,

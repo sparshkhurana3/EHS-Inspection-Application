@@ -16,6 +16,7 @@ import {
 
 import {
   createPatrol,
+  getInspectionReport,
   getPlanningLookups,
   getRoster,
   updatePatrolAssignment,
@@ -58,6 +59,19 @@ router.get(
   authenticate,
   authorize(...PLANNING_ROLES),
   getRoster,
+);
+
+/*
+ * The zone-by-week inspection report as an .xlsx download: every zone
+ * at the officer's location, who is answerable for it, and whether
+ * each week's audit happened. Declared before /:patrolId/assignment so
+ * the literal path is never parsed as a patrol id.
+ */
+router.get(
+  "/inspection-report",
+  authenticate,
+  authorize(...PLANNING_ROLES),
+  getInspectionReport,
 );
 
 /*

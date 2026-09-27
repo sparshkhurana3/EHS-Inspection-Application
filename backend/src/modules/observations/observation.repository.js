@@ -326,11 +326,6 @@ export async function findWeeklyAuditorAssignments(
         closure_request.id AS closure_id,
         closure_request.status AS closure_status,
 
-        latest_ticket.id AS ticket_id,
-        latest_ticket.status AS ticket_status,
-        latest_ticket.decision AS ticket_decision,
-        latest_ticket.closure_date AS ticket_closure_date,
-
         (
           SELECT COUNT(*)
           FROM observation_items AS item
@@ -396,19 +391,6 @@ export async function findWeeklyAuditorAssignments(
         ON closure_request.observation_report_id =
            observation_report.id
 
-      LEFT JOIN LATERAL (
-        SELECT
-          ticket.id,
-          ticket.status,
-          ticket.decision,
-          ticket.closure_date
-        FROM action_tickets AS ticket
-        WHERE ticket.closure_request_id =
-          closure_request.id
-        ORDER BY ticket.closure_round DESC
-        LIMIT 1
-      ) AS latest_ticket ON TRUE
-
       LEFT JOIN zone_areas AS zone_area
         ON zone_area.zone_id = zone_record.id
        AND zone_area.is_active = TRUE
@@ -444,9 +426,7 @@ export async function findWeeklyAuditorAssignments(
         auditor.full_name, auditee.full_name,
         ehs_officer.full_name,
         observation_report.id, report_area.name,
-        closure_request.id, closure_request.status,
-        latest_ticket.id, latest_ticket.status,
-        latest_ticket.decision, latest_ticket.closure_date
+        closure_request.id, closure_request.status
 
       ORDER BY
         patrol.scheduled_date ASC,
@@ -482,12 +462,6 @@ export async function findWeeklyAuditorAssignments(
           closureId: row.closure_id,
           closureStatus:
             row.closure_status,
-          ticketId: row.ticket_id,
-          ticketStatus: row.ticket_status,
-          ticketDecision:
-            row.ticket_decision,
-          ticketClosureDate:
-            row.ticket_closure_date,
         }
       : null,
   }));
@@ -522,14 +496,6 @@ export async function findPhotographByReportId(
           patrol.auditor_id = $2
           OR patrol.auditee_id = $2
           OR patrol.ehs_officer_id = $2
-          OR EXISTS (
-            SELECT 1
-            FROM action_tickets AS ticket
-            WHERE
-              ticket.observation_report_id =
-                observation_report.id
-              AND ticket.action_hod_id = $2
-          )
         )
 
       LIMIT 1
@@ -621,14 +587,6 @@ export async function findItemPhotograph(
           patrol.auditor_id = $3
           OR patrol.auditee_id = $3
           OR patrol.ehs_officer_id = $3
-          OR EXISTS (
-            SELECT 1
-            FROM action_tickets AS ticket
-            WHERE
-              ticket.observation_report_id =
-                observation_report.id
-              AND ticket.action_hod_id = $3
-          )
           /*
            * Same plant-management scope as
            * findReportByIdForUser: whoever may open the
@@ -1229,11 +1187,11 @@ export async function updatePatrolAfterSubmission(
 
 /**
  * One observation report with the context needed to display it: its
- * items, the closure that followed it (if any), and the latest ticket
+ * items and the closure that followed it (if any)
  * on that closure (if any).
  *
  * Ownership: the auditor who filed it, the auditee who must act on it,
- * the EHS Officer who owns the patrol, the Action HOD of its ticket, or
+ * the EHS Officer who owns the patrol, or
  * a management user (EHS_OFFICER/HOD/PLANT_HEAD/ADMIN) at the same
  * plant. Anyone else gets nothing, so a guessed id leaks no data.
  */
@@ -1281,17 +1239,10 @@ export async function findReportByIdForUser(
         closure_request.status AS closure_status,
         closure_request.action_plan,
         closure_request.target_date,
-        closure_request.responsible_hod_name
-          AS action_hod_name,
         closure_request.approved_at
           AS closure_approved_at,
         closure_request.closed_at
-          AS closure_closed_at,
-
-        latest_ticket.id AS ticket_id,
-        latest_ticket.status AS ticket_status,
-        latest_ticket.decision AS ticket_decision,
-        latest_ticket.closure_date AS ticket_closure_date
+          AS closure_closed_at
 
       FROM observation_reports AS observation_report
 
@@ -1323,18 +1274,6 @@ export async function findReportByIdForUser(
         ON closure_request.observation_report_id =
            observation_report.id
 
-      LEFT JOIN LATERAL (
-        SELECT
-          ticket.id,
-          ticket.status,
-          ticket.decision,
-          ticket.closure_date
-        FROM action_tickets AS ticket
-        WHERE ticket.closure_request_id =
-          closure_request.id
-        ORDER BY ticket.closure_round DESC
-        LIMIT 1
-      ) AS latest_ticket ON TRUE
 
       WHERE
         observation_report.id = $1
@@ -1342,14 +1281,6 @@ export async function findReportByIdForUser(
           patrol.auditor_id = $2
           OR patrol.auditee_id = $2
           OR patrol.ehs_officer_id = $2
-          OR EXISTS (
-            SELECT 1
-            FROM action_tickets AS ticket
-            WHERE
-              ticket.observation_report_id =
-                observation_report.id
-              AND ticket.action_hod_id = $2
-          )
           OR EXISTS (
             SELECT 1
             FROM users AS me
@@ -1397,22 +1328,10 @@ export async function findReportByIdForUser(
           status: row.closure_status,
           actionPlan: row.action_plan,
           targetDate: row.target_date,
-          actionHodName:
-            row.action_hod_name,
           approvedAt:
             row.closure_approved_at,
           closedAt:
             row.closure_closed_at,
-        }
-      : null,
-
-    ticket: row.ticket_id
-      ? {
-          id: row.ticket_id,
-          status: row.ticket_status,
-          decision: row.ticket_decision,
-          closureDate:
-            row.ticket_closure_date,
         }
       : null,
   };
@@ -1446,8 +1365,10 @@ export async function findUserPlantId(
  * Every observation report at or after `fromDate` (the six-month
  * window), scoped to the caller's own patrols unless `managementScope`
  * is set, in which case every report at `plantId` is included too. The
- * "closed" filter follows the latest ticket's status, per the product
- * definition of a report being closed via ticket.
+ * A report counts as "closed" once it can no longer come back to
+ * anybody: either the auditor recorded no observations, or the EHS
+ * Officer approved the auditee's closure. Everything else is still in
+ * progress somewhere.
  */
 export async function findReportHistory(
   {
@@ -1459,13 +1380,18 @@ export async function findReportHistory(
   },
   client = databasePool,
 ) {
+  const CLOSED_PREDICATE = `(
+    observation_report.no_observations = TRUE
+    OR closure_request.status = 'APPROVED'
+  )`;
+
   const filterClause =
     filter === "closed"
-      ? "AND latest_ticket.status = 'CLOSED'"
+      ? `AND ${CLOSED_PREDICATE}`
       : filter === "no_observations"
         ? "AND observation_report.no_observations = TRUE"
         : filter === "in_progress"
-          ? "AND observation_report.no_observations = FALSE AND (latest_ticket.status IS DISTINCT FROM 'CLOSED')"
+          ? `AND NOT ${CLOSED_PREDICATE}`
           : "";
 
   const result = await client.query(
@@ -1492,10 +1418,6 @@ export async function findReportHistory(
 
         closure_request.id AS closure_id,
         closure_request.status AS closure_status,
-
-        latest_ticket.id AS ticket_id,
-        latest_ticket.status AS ticket_status,
-        latest_ticket.decision AS ticket_decision,
 
         (
           SELECT COUNT(*)
@@ -1537,18 +1459,6 @@ export async function findReportHistory(
       LEFT JOIN closure_requests AS closure_request
         ON closure_request.observation_report_id =
            observation_report.id
-
-      LEFT JOIN LATERAL (
-        SELECT
-          ticket.id,
-          ticket.status,
-          ticket.decision
-        FROM action_tickets AS ticket
-        WHERE ticket.closure_request_id =
-          closure_request.id
-        ORDER BY ticket.closure_round DESC
-        LIMIT 1
-      ) AS latest_ticket ON TRUE
 
       WHERE
         patrol.scheduled_date >= $1::DATE
@@ -1601,9 +1511,6 @@ export async function findReportHistory(
     closureId: row.closure_id,
     closureStatus: row.closure_status,
 
-    ticketId: row.ticket_id,
-    ticketStatus: row.ticket_status,
-    ticketDecision: row.ticket_decision,
 
     observationCount: Number(
       row.observation_count ?? 0,

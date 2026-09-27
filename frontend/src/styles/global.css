@@ -622,7 +622,13 @@ a { color: inherit; }
 }
 .form-field label { display: block; margin-bottom: 8px; color: #344054; font-size: 0.85rem; font-weight: 750; }
 .form-field-help { display: block; margin-top: 7px; color: #667085; font-size: 0.75rem; line-height: 1.45; }
-.form-field input {
+/*
+ * textarea was never covered here, only .observation-form-field and
+ * .closure-form-field, so a .form-field textarea rendered at the
+ * browser's default size. The closure action plan uses .form-field.
+ */
+.form-field input,
+.form-field textarea {
   width: 100%;
   min-height: 47px;
   padding: 11px 13px;
@@ -633,9 +639,22 @@ a { color: inherit; }
   outline: none;
   transition: border-color 180ms ease, box-shadow 180ms ease;
 }
-.form-field input::placeholder { color: #98a2b3; }
-.form-field input:focus { border-color: #12b76a; box-shadow: 0 0 0 4px rgba(18, 183, 106, 0.12); }
+.form-field textarea { min-height: 110px; line-height: 1.55; resize: vertical; }
+.form-field input::placeholder,
+.form-field textarea::placeholder { color: #98a2b3; }
+.form-field input:focus,
+.form-field textarea:focus { border-color: #12b76a; box-shadow: 0 0 0 4px rgba(18, 183, 106, 0.12); }
 .auth-submit-button { width: 100%; margin-top: 4px; }
+
+/* Single sign-on, shown beneath the password form on the sign-in page */
+.auth-sso { margin-top: 22px; }
+.auth-sso-divider { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; color: #98a2b3; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.08em; }
+.auth-sso-divider::before,
+.auth-sso-divider::after { content: ""; flex: 1; height: 1px; background: #e4e7ec; }
+.auth-sso-button { width: 100%; display: inline-flex; align-items: center; justify-content: center; gap: 10px; font-weight: 750; }
+.auth-sso-logo { width: 18px; height: 18px; flex-shrink: 0; }
+.auth-sso-hint { margin: 12px 0 0; color: #667085; font-size: 0.78rem; line-height: 1.5; text-align: center; }
+
 .auth-switch-message { margin: 24px 0 0; color: #667085; font-size: 0.86rem; text-align: center; }
 .auth-switch-message a { color: #087f5b; font-weight: 800; text-decoration: none; }
 .auth-switch-message a:hover { text-decoration: underline; }
@@ -803,6 +822,77 @@ a { color: inherit; }
 .calendar-audit-indicator span { margin-top: 2px; color: #087f5b; font-size: 0.6rem; }
 .calendar-more-audits { color: #667085; font-size: 0.64rem; font-weight: 700; }
 .upcoming-section { margin-top: 25px; }
+.planning-report-note {
+  margin: -6px 0 20px;
+  color: #667085;
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+/* Year-to-date metric tiles, above the calendar */
+.dashboard-metrics { margin-bottom: 22px; }
+.dashboard-metrics-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.dashboard-metrics-header h2 { margin: 0; color: #1d2939; font-size: 1.2rem; }
+.dashboard-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 16px;
+}
+.metric-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 18px 20px;
+  border: 1px solid #e4e7ec;
+  border-radius: 12px;
+  background: #fff;
+}
+.metric-tile-label {
+  color: #667085;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+.metric-tile-value {
+  margin: 0;
+  color: #101828;
+  font-size: 1.9rem;
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+}
+.metric-tile-of {
+  color: #98a2b3;
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+.metric-tile-bar {
+  height: 6px;
+  margin-top: 2px;
+  border-radius: 999px;
+  background: #eaecf0;
+  overflow: hidden;
+}
+.metric-tile-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: #12b76a;
+}
+.metric-tile-caption {
+  color: #667085;
+  font-size: 0.73rem;
+  line-height: 1.45;
+}
+
 .dashboard-section-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 17px; margin-bottom: 12px; }
 .dashboard-section-heading h2 { margin: 4px 0 0; color: #1d2939; font-size: 1.2rem; }
 .dashboard-single-record { color: #667085; font-size: 0.72rem; }
@@ -1582,7 +1672,6 @@ a { color: inherit; }
 .closure-observation,
 .closure-action-plan,
 .closure-approval,
-.ticket-action-panel,
 .patrol-form-card {
   background: #ffffff;
   border: 1px solid #e4e7ec;
@@ -1640,72 +1729,6 @@ a { color: inherit; }
   .closure-list-item {
     flex-direction: column;
     align-items: flex-start;
-  }
-}
-
-/* Tickets */
-
-.ticket-chip {
-  padding: 3px 10px;
-  border-radius: 999px;
-  background: #f4f3ff;
-  color: #5925dc;
-  font-weight: 600;
-  font-size: 0.8rem;
-  white-space: nowrap;
-}
-
-.ticket-status-open {
-  background: #eff8ff;
-  color: #175cd3;
-}
-
-.ticket-status-in_progress {
-  background: #fffaeb;
-  color: #b54708;
-}
-
-.ticket-status-closed {
-  background: #ecfdf3;
-  color: #067647;
-}
-
-.ticket-overdue {
-  border-left-color: #b42318;
-}
-
-.ticket-evidence-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  margin: 16px 0;
-}
-
-.ticket-evidence-item {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.ticket-evidence-item img {
-  width: 100%;
-  aspect-ratio: 1 / 1;
-  object-fit: cover;
-  border-radius: 10px;
-  border: 1px solid #e4e7ec;
-}
-
-.ticket-decision-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 16px;
-}
-
-@media (max-width: 650px) {
-  .ticket-evidence-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -2055,7 +2078,7 @@ a { color: inherit; }
   }
 }
 
-/* Multi-observation blocks inside a closure / ticket summary */
+/* Multi-observation blocks inside a closure summary */
 
 .closure-observation-item + .closure-observation-item {
   margin-top: 18px;
@@ -2087,7 +2110,6 @@ a { color: inherit; }
   padding-bottom: 6px;
 }
 
-.closure-item-card .ticket-status-card,
 .closure-item-card .closure-action-plan {
   margin: 0 18px 18px;
   border: 1px solid #eaecf0;
@@ -2099,6 +2121,14 @@ a { color: inherit; }
   padding-top: 6px;
 }
 
+/* The action plan's word counter, which sits under its textarea. */
+.closure-item-card .form-field > span[id^="action-plan-count"] {
+  display: block;
+  margin-top: 6px;
+  color: #667085;
+  font-size: 0.75rem;
+}
+
 .closure-item-disabled-note {
   margin: 0 0 4px;
   padding: 11px 13px;
@@ -2108,9 +2138,14 @@ a { color: inherit; }
   font-size: 0.78rem;
 }
 
-.closure-ticket-summary-chip {
+.closure-item-summary-chip {
+  padding: 3px 10px;
+  border-radius: 999px;
   background: #f2f4f7;
   color: #475467;
+  font-weight: 600;
+  font-size: 0.8rem;
+  white-space: nowrap;
 }
 
 .closure-submit-row {
@@ -2128,45 +2163,127 @@ a { color: inherit; }
   }
 }
 
-/* Ticket: pending approval, reopen, history, resolution */
+/* Evidence of closure, attached per observation */
 
-.ticket-status-pending_approval {
-  background: #fffaeb;
-  color: #b54708;
+.closure-evidence {
+  margin: 0 18px 18px;
+  padding: 16px 18px;
+  border: 1px solid #eaecf0;
+  border-radius: 11px;
+  background: #fcfcfd;
 }
 
-.ticket-reopened-tag {
-  display: inline-block;
-  margin-top: 4px;
-  padding: 3px 8px;
-  border-radius: 999px;
-  background: #fef3f2;
-  color: #b42318;
-  font-size: 0.66rem;
-  font-weight: 800;
-}
-
-.ticket-resolution-form {
-  margin-top: 18px;
-  padding-top: 16px;
-  border-top: 1px solid #eaecf0;
-}
-
-.ticket-resolution-form h4 {
-  margin: 0 0 12px;
-  color: #1d2939;
-  font-size: 0.95rem;
-}
-
-.ticket-approval-actions {
+.closure-evidence-header {
   display: flex;
   flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
   gap: 10px;
-  margin-top: 14px;
+  margin-bottom: 12px;
 }
 
-.ticket-history-row {
-  grid-template-columns: 1fr 1.5fr 1.1fr 1.1fr 0.9fr 1.1fr;
+.closure-evidence-header > span:first-child {
+  color: #344054;
+  font-size: 0.85rem;
+  font-weight: 750;
+}
+
+.closure-evidence-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0 0 14px;
+  padding: 0;
+  list-style: none;
+}
+
+.closure-evidence-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.closure-evidence-list img {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 1px solid #e4e7ec;
+  background: #fff;
+}
+
+.closure-evidence-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1 / 1;
+  border-radius: 10px;
+  border: 1px dashed #d0d5dd;
+  color: #98a2b3;
+  font-size: 0.76rem;
+}
+
+.closure-evidence-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.closure-evidence-meta > span {
+  overflow: hidden;
+  color: #667085;
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.closure-evidence-remove {
+  flex-shrink: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: #b42318;
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.closure-evidence-remove:disabled {
+  color: #98a2b3;
+  cursor: not-allowed;
+}
+
+.closure-evidence-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+/*
+ * The real input is replaced by its own label, which is styled as a
+ * button; it stays reachable from the keyboard through the label.
+ */
+.closure-evidence-actions input[type="file"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.closure-evidence-actions label[aria-disabled="true"] {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+@media (max-width: 650px) {
+  .closure-evidence-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .closure-list-item-selected {

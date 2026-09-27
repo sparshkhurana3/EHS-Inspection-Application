@@ -5,12 +5,14 @@ import { formatDate } from "../../lib/errorMessage.js";
 
 import PatrolForm from "./PatrolForm.jsx";
 import RosterUploadPanel from "./RosterUploadPanel.jsx";
+import useInspectionReport from "./useInspectionReport.js";
 import usePatrols from "./usePatrols.js";
 import useRoster from "./useRoster.js";
 
 export default function PlanningPage() {
   const planning = usePatrols();
   const roster = useRoster();
+  const report = useInspectionReport();
 
   if (planning.loading) {
     return (
@@ -46,7 +48,34 @@ export default function PlanningPage() {
 
           <p>{planning.location.name}</p>
         </div>
+
+        <button
+          type="button"
+          className="button button-secondary"
+          onClick={report.download}
+          disabled={report.downloading}
+        >
+          {report.downloading
+            ? "Preparing..."
+            : "Download inspection report"}
+        </button>
       </header>
+
+      {report.error ? (
+        <Alert
+          type="error"
+          title="Unable to download the report"
+        >
+          {report.error}
+        </Alert>
+      ) : null}
+
+      <p className="planning-report-note">
+        The report covers every zone at this
+        location for the year so far: who last
+        audited it, and whether each week&apos;s
+        inspection was carried out.
+      </p>
 
       <RosterUploadPanel
         roster={roster.roster}

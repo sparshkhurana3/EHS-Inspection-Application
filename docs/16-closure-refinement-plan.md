@@ -1,5 +1,13 @@
 # 16. Closure page: one action plan per observation, and a status driven by ticket outcomes
 
+> **Partly superseded.** The one-action-plan-per-observation structure
+> this introduced is still how closures work. Everything here about
+> assigning an observation to a department, the Action Team HOD's
+> ticket, and a status derived from ticket outcomes was removed in
+> [19](19-remove-tickets-plan.md). Kept as the record of why the
+> per-observation structure exists.
+
+
 Implementation plan for the auditee's **Closures** page refinement. Written to be implemented file by file without further design decisions. Read [02-architecture.md](02-architecture.md) for the layering rules first. The page as it stands is described in [11-closure-page-plan.md](11-closure-page-plan.md); the ticket half is [13-action-ticket-plan.md](13-action-ticket-plan.md). This plan supersedes one sentence of [15-observations-refinement-plan.md](15-observations-refinement-plan.md)'s D3 ("the auditee writes one action plan covering all observations") — see D1 below — and depends on 15's `observation_items` table, so **implement 15 first**.
 
 **Goal**

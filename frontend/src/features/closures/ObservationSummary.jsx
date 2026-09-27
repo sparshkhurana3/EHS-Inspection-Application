@@ -60,7 +60,7 @@ function ObservationBlock({
 }
 
 /**
- * The observation report half of a closure or ticket: the header once,
+ * The observation report half of a closure: the header once,
  * then every observation on the report. A report filed before
  * multi-observation support has a single item and renders exactly as
  * it did before.

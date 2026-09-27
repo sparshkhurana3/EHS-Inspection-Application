@@ -1,3 +1,6 @@
+import path from "node:path";
+import { access } from "node:fs/promises";
+
 import {
   withTransaction,
 } from "../../config/database.js";
@@ -8,13 +11,15 @@ import AppError
 import * as closureRepository
   from "./closure.repository.js";
 
-import * as ticketService
-  from "../tickets/ticket.service.js";
-
 import {
-  isReadyForSubmission,
   recomputeClosureStatus,
 } from "./closureStatus.js";
+
+import {
+  MAX_EVIDENCE_FILES,
+  UPLOAD_DIRECTORY,
+  removeUploadedFiles,
+} from "./closureUpload.js";
 
 const MAX_ACTION_PLAN_WORDS = 255;
 
@@ -65,10 +70,9 @@ function getCurrentLocalDate() {
 }
 
 /*
- * The three states the closure report has (docs/16-closure-refinement-
- * plan.md): Open while any observation still needs a plan or a
- * department has not taken its ticket up, In Progress once every
- * observation is with a department, Closed once the EHS Officer has
+ * The three states the closure report has: Open while any observation
+ * still needs an action plan, In Progress once every observation has
+ * one and the auditee may submit, Closed once the EHS Officer has
  * approved it.
  *
  * REEXAMINATION_REQUIRED reads "Open" — the plan has to be redone — and
@@ -103,55 +107,17 @@ function getDisplayStatus(status) {
 }
 
 /*
- * Mirrors the label map in tickets/ticket.service.js. Kept local rather
- * than imported so this module does not depend on ticket internals for
- * a three-entry lookup.
- */
-const TICKET_STATUS_LABELS = {
-  OPEN: "Open",
-  IN_PROGRESS: "In Progress",
-  CLOSED: "Closed",
-};
-
-/*
- * An observation's plan stays editable while the closure itself is
- * editable and no department has acted on that observation yet: once a
- * ticket is accepted or rejected, its snapshot is what the decision
- * refers to, so the text is frozen (docs/16, D8).
+ * An observation's plan and its evidence stay editable for as long as
+ * the closure itself is. Nothing freezes an individual observation any
+ * more: there is no department decision to snapshot it against, and
+ * while the closure is with the auditee every part of it is theirs to
+ * revise. Submitting, or the officer's approval, is what locks it.
  */
 function canEditClosureItem(
-  item,
   closureStatus,
-  approvalIteration = 0,
 ) {
-  if (
-    !EDITABLE_CLOSURE_STATUSES.has(
-      normalizeStatus(closureStatus),
-    )
-  ) {
-    return false;
-  }
-
-  if (!item.ticket) {
-    return true;
-  }
-
-  /*
-   * A ticket from an earlier round is history: when the EHS Officer
-   * sends a closure back, the round advances and every observation is
-   * open for rework again, with a fresh ticket raised on the next save
-   * (docs/16, D7).
-   */
-  if (
-    Number(item.ticket.closureRound ?? 0) <
-    Number(approvalIteration ?? 0)
-  ) {
-    return true;
-  }
-
-  return (
-    normalizeStatus(item.ticket.status) ===
-    "OPEN"
+  return EDITABLE_CLOSURE_STATUSES.has(
+    normalizeStatus(closureStatus),
   );
 }
 
@@ -163,22 +129,31 @@ function createClosureResponse(closure) {
   const normalizedStatus =
     normalizeStatus(closure.status);
 
+  const itemsEditable = canEditClosureItem(
+    normalizedStatus,
+  );
+
   const items = (closure.items ?? []).map(
-    (item) => ({
-      ...item,
+    (item) => {
+      const evidence = item.evidence ?? [];
 
-      canEdit: canEditClosureItem(
-        item,
-        normalizedStatus,
-        closure.approvalIteration,
-      ),
+      return {
+        ...item,
+        evidence,
+        evidenceCount: evidence.length,
 
-      ticketDisplayStatus: item.ticket
-        ? (TICKET_STATUS_LABELS[
-            item.ticket.status
-          ] ?? item.ticket.status)
-        : null,
-    }),
+        canEdit: itemsEditable,
+
+        /*
+         * Evidence is optional, so this only reports whether there is
+         * room for another photograph, never that one is owed.
+         */
+        canAddEvidence:
+          itemsEditable &&
+          evidence.length <
+            MAX_EVIDENCE_FILES,
+      };
+    },
   );
 
   const everyItemPlanned =
@@ -187,34 +162,16 @@ function createClosureResponse(closure) {
       String(item.actionPlan ?? "").trim(),
     );
 
-  const everyTicketClosed =
-    items.length > 0 &&
-    items.every(
-      (item) =>
-        normalizeStatus(
-          item.ticket?.status,
-        ) === "CLOSED",
-    );
+  const evidenceCount = items.reduce(
+    (total, item) =>
+      total + item.evidenceCount,
+    0,
+  );
 
-  const closedTicketCount = items.filter(
+  const plannedItemCount = items.filter(
     (item) =>
-      normalizeStatus(item.ticket?.status) ===
-      "CLOSED",
+      String(item.actionPlan ?? "").trim(),
   ).length;
-
-  const hasCompleteActionPlan =
-    Boolean(
-      String(
-        closure.actionPlan ?? "",
-      ).trim(),
-    ) &&
-    Boolean(closure.targetDate) &&
-    Boolean(
-      String(
-        closure.responsibleHodName ??
-          "",
-      ).trim(),
-    );
 
   return {
     ...closure,
@@ -226,26 +183,27 @@ function createClosureResponse(closure) {
         normalizedStatus,
       ),
 
-    canEditActionPlan:
-      EDITABLE_CLOSURE_STATUSES.has(
-        normalizedStatus,
-      ),
+    canEditActionPlan: itemsEditable,
 
     items,
 
+    maxEvidencePerObservation:
+      MAX_EVIDENCE_FILES,
+
     /*
-     * A closure may be sent for approval only once every observation
-     * has a plan and every department has resolved its ticket
-     * (docs/16, D6).
+     * A closure goes to the EHS Officer once every observation has an
+     * action plan. Evidence is not part of the test: it is optional
+     * supporting material, and the officer can send the closure back
+     * if what was attached does not convince them.
      */
     canSubmitForClosure:
       normalizedStatus ===
         "IN_PROGRESS" &&
-      everyItemPlanned &&
-      everyTicketClosed,
+      everyItemPlanned,
 
     itemCount: items.length,
-    closedTicketCount,
+    plannedItemCount,
+    evidenceCount,
 
     /*
      * A returned closure reads "Open", exactly like one never touched,
@@ -254,20 +212,12 @@ function createClosureResponse(closure) {
     wasReturned:
       normalizedStatus ===
       "REEXAMINATION_REQUIRED",
-
-    ticketDisplayStatus:
-      closure.ticketStatus
-        ? (TICKET_STATUS_LABELS[
-            closure.ticketStatus
-          ] ?? closure.ticketStatus)
-        : null,
   };
 }
 
 function validateActionPlanInput({
   actionPlan,
   targetDate,
-  responsibleHodName,
 }) {
   if (!actionPlan) {
     throw new AppError(
@@ -313,23 +263,6 @@ function validateActionPlanInput({
     );
   }
 
-  if (!responsibleHodName) {
-    throw new AppError(
-      "Responsible HOD name is required.",
-      400,
-      "RESPONSIBLE_HOD_REQUIRED",
-    );
-  }
-
-  if (
-    responsibleHodName.length > 255
-  ) {
-    throw new AppError(
-      "Responsible HOD name cannot exceed 255 characters.",
-      400,
-      "RESPONSIBLE_HOD_NAME_TOO_LONG",
-    );
-  }
 }
 
 /*
@@ -428,33 +361,9 @@ export async function getClosureById({
     );
   }
 
-  /*
-   * Embed the full ticket (with evidence) so the auditee and the EHS
-   * Officer see the Action Team HOD's decision without a second round
-   * trip. The read predicates line up: whoever can see this closure can
-   * see the ticket that belongs to it.
-   */
-  let ticket = null;
-
-  if (closure.ticketId) {
-    try {
-      const ticketResult =
-        await ticketService.getTicketById({
-          userId,
-          ticketId: closure.ticketId,
-        });
-
-      ticket = ticketResult.ticket;
-    } catch {
-      ticket = null;
-    }
-  }
-
   return {
-    closure: {
-      ...createClosureResponse(closure),
-      ticket,
-    },
+    closure:
+      createClosureResponse(closure),
   };
 }
 
@@ -612,64 +521,11 @@ export async function rejectClosure(input) {
 }
 
 /**
- * The Action Team HOD options for the auditee's assignment dropdown:
- * active ACTION_HOD users at this closure's own plant. An empty array
- * is a normal 200; the frontend explains it rather than treating it as
- * an error.
- */
-/**
- * The departments the auditee may assign an observation to: those at
- * this closure's plant with an Action Team HOD registered.
- */
-export async function getDepartmentOptions({
-  userId,
-  closureId,
-}) {
-  const [plantName, departments] =
-    await Promise.all([
-      closureRepository
-        .findPlantNameForClosure({
-          closureId,
-          auditeeId: userId,
-        }),
-
-      closureRepository
-        .findDepartmentsForClosure({
-          closureId,
-          auditeeId: userId,
-        }),
-    ]);
-
-  if (plantName === null) {
-    throw new AppError(
-      "The closure assignment was not found or is not assigned to the authenticated auditee.",
-      404,
-      "CLOSURE_ASSIGNMENT_NOT_FOUND",
-    );
-  }
-
-  return {
-    plantName,
-
-    departments: departments.map(
-      (department) => ({
-        id: department.id,
-        name: department.name,
-        code: department.code,
-        hodId: department.hodId,
-        hodName: department.hodName,
-      }),
-    ),
-  };
-}
-
-/**
- * Saves one observation's action plan and assigns it to a department.
+ * Saves one observation's action plan.
  *
- * Each observation is an independent unit: saving one opens (or, while
- * still OPEN, refreshes) that observation's own ticket, and the
- * closure's status is then re-derived from every observation and its
- * ticket (docs/16-closure-refinement-plan.md).
+ * Each observation is an independent unit: the auditee writes a plan
+ * against each one, and the closure's status is re-derived from all of
+ * them afterwards.
  */
 export async function saveClosureItem({
   userId,
@@ -677,7 +533,6 @@ export async function saveClosureItem({
   closureItemId,
   actionPlan,
   targetDate,
-  departmentId,
 }) {
   if (!userId) {
     throw new AppError(
@@ -727,43 +582,12 @@ export async function saveClosureItem({
     );
   }
 
-  /*
-   * The department is chosen from a dropdown scoped to this closure's
-   * plant, and the ticket goes to that department's Action Team HOD.
-   * Both the department and the HOD are resolved server-side, never
-   * accepted from the client.
-   */
-  const departmentOptions =
-    await closureRepository
-      .findDepartmentsForClosure({
-        closureId,
-        auditeeId: userId,
-      });
-
-  const selectedDepartment =
-    departmentOptions.find(
-      (department) =>
-        Number(department.id) ===
-        Number(departmentId),
-    );
-
-  if (!selectedDepartment) {
-    throw new AppError(
-      "Select a department with an Action Team HOD registered at this location.",
-      400,
-      "INVALID_DEPARTMENT",
-    );
-  }
-
   validateActionPlanInput({
     actionPlan:
       normalizedActionPlan,
 
     targetDate:
       normalizedTargetDate,
-
-    responsibleHodName:
-      selectedDepartment.hodName,
   });
 
   await withTransaction(
@@ -814,15 +638,13 @@ export async function saveClosureItem({
 
       if (
         !canEditClosureItem(
-          item,
           lockedClosure.status,
-          lockedClosure.approvalIteration,
         )
       ) {
         throw new AppError(
-          "A decision has already been recorded for this observation, so its action plan can no longer be changed.",
+          "The action plan cannot be changed in the current status.",
           409,
-          "CLOSURE_ITEM_LOCKED",
+          "CLOSURE_ACTION_PLAN_LOCKED",
         );
       }
 
@@ -838,15 +660,6 @@ export async function saveClosureItem({
 
               targetDate:
                 normalizedTargetDate,
-
-              responsibleHodName:
-                selectedDepartment.hodName,
-
-              actionHodId:
-                selectedDepartment.hodId,
-
-              departmentId:
-                selectedDepartment.id,
             },
             client,
           );
@@ -859,53 +672,10 @@ export async function saveClosureItem({
         );
       }
 
-      /* Item #1 mirrors onto the closure's own columns (D2). */
+      /* Item #1 mirrors onto the closure's own columns. */
       await closureRepository
         .syncClosureHeaderFromItemOne(
           closureId,
-          client,
-        );
-
-      /*
-       * Open (or, while still OPEN, refresh) this observation's ticket
-       * for the closure's current approval round. Failing to open one
-       * must not leave a plan with nobody assigned to act on it, so it
-       * runs in the same transaction as the save.
-       */
-      await closureRepository
-        .upsertTicketForClosureRound(
-          {
-            closureId,
-            closureItemId,
-
-            observationReportId:
-              lockedClosure
-                .observationReportId,
-
-            patrolId:
-              lockedClosure.patrolId,
-
-            closureRound:
-              lockedClosure
-                .approvalIteration,
-
-            actionHodId:
-              selectedDepartment.hodId,
-
-            actionHodName:
-              selectedDepartment.hodName,
-
-            departmentId:
-              selectedDepartment.id,
-
-            proposedActionPlan:
-              normalizedActionPlan,
-
-            targetDate:
-              normalizedTargetDate,
-
-            assignedBy: userId,
-          },
           client,
         );
 
@@ -972,9 +742,8 @@ export async function submitClosure({
   }
 
   /*
-   * Every observation needs a plan, and every department needs to have
-   * resolved its ticket (implemented or rejected), before the closure
-   * can go to the EHS Officer (docs/16, D6).
+   * Every observation needs an action plan before the closure can go to
+   * the EHS Officer. Evidence photographs are optional.
    */
   const items =
     await closureRepository
@@ -993,14 +762,6 @@ export async function submitClosure({
       "Every observation needs a saved action plan before this closure can be submitted.",
       400,
       "INCOMPLETE_CLOSURE_REPORT",
-    );
-  }
-
-  if (!isReadyForSubmission(items)) {
-    throw new AppError(
-      "Every observation's ticket must be accepted or rejected and closed before this closure can be submitted.",
-      400,
-      "CLOSURE_TICKETS_OPEN",
     );
   }
 
@@ -1107,5 +868,346 @@ export async function submitClosure({
       createClosureResponse(
         updatedClosure,
       ),
+  };
+}
+/*
+ * ----------------------------------------------------------------
+ * Evidence of closure
+ *
+ * Up to three photographs per observation, showing that the action
+ * plan written against it was actually carried out. Optional: an
+ * observation can be closed on its plan alone, and it is the EHS
+ * Officer's approval that decides whether that was enough.
+ * ----------------------------------------------------------------
+ */
+
+/**
+ * Finds one observation of a closure the auditee owns, and confirms
+ * the closure is still theirs to change. Shared by the upload and the
+ * delete, which need exactly the same checks.
+ */
+async function findEditableClosureItem({
+  userId,
+  closureId,
+  closureItemId,
+  client,
+}) {
+  const closure =
+    await closureRepository
+      .findClosureByIdForAuditee(
+        {
+          closureId,
+          auditeeId: userId,
+        },
+        client,
+      );
+
+  if (!closure) {
+    throw new AppError(
+      "The closure assignment was not found or is not assigned to the authenticated auditee.",
+      404,
+      "CLOSURE_ASSIGNMENT_NOT_FOUND",
+    );
+  }
+
+  if (
+    !canEditClosureItem(closure.status)
+  ) {
+    throw new AppError(
+      "Evidence cannot be changed in the current status.",
+      409,
+      "CLOSURE_ACTION_PLAN_LOCKED",
+    );
+  }
+
+  const items =
+    await closureRepository
+      .findClosureItems(
+        closureId,
+        client,
+      );
+
+  const item = items.find(
+    (entry) =>
+      Number(entry.id) ===
+      Number(closureItemId),
+  );
+
+  if (!item) {
+    throw new AppError(
+      "That observation is not part of this closure.",
+      404,
+      "CLOSURE_ITEM_NOT_FOUND",
+    );
+  }
+
+  return { closure, item };
+}
+
+/**
+ * Attaches photographs to one observation's action plan.
+ *
+ * The files are already on disk by the time this runs, because multer
+ * writes them before the handler. So every path out of here that does
+ * not record them in the database has to delete them again, or the
+ * upload directory fills with files nothing points at.
+ */
+export async function addClosureItemEvidence({
+  userId,
+  closureId,
+  closureItemId,
+  files,
+}) {
+  const uploaded = files ?? [];
+
+  if (uploaded.length === 0) {
+    throw new AppError(
+      "Attach at least one photograph.",
+      400,
+      "EVIDENCE_REQUIRED",
+    );
+  }
+
+  try {
+    const evidence =
+      await withTransaction(
+        async (client) => {
+          await findEditableClosureItem({
+            userId,
+            closureId,
+            closureItemId,
+            client,
+          });
+
+          /*
+           * Locked and counted inside the transaction: two uploads
+           * arriving together would otherwise each see room and
+           * between them exceed the limit.
+           */
+          const existingCount =
+            await closureRepository
+              .countClosureItemEvidenceForUpdate(
+                closureItemId,
+                client,
+              );
+
+          if (
+            existingCount +
+              uploaded.length >
+            MAX_EVIDENCE_FILES
+          ) {
+            throw new AppError(
+              `An observation can hold up to ${MAX_EVIDENCE_FILES} evidence photographs, and this one already has ${existingCount}.`,
+              400,
+              "TOO_MANY_EVIDENCE_IMAGES",
+            );
+          }
+
+          return Promise.all(
+            uploaded.map((file) =>
+              closureRepository
+                .insertClosureItemEvidence(
+                  {
+                    closureItemId,
+
+                    filePath: path.relative(
+                      process.cwd(),
+                      file.path,
+                    ),
+
+                    originalName:
+                      file.originalname,
+
+                    mimeType:
+                      file.mimetype,
+
+                    size: file.size,
+
+                    uploadedBy: userId,
+                  },
+                  client,
+                ),
+            ),
+          );
+        },
+      );
+
+    const refreshed = await getClosureById({
+      userId,
+      closureId,
+    });
+
+    return {
+      message:
+        evidence.length === 1
+          ? "Evidence photograph attached."
+          : "Evidence photographs attached.",
+
+      closure: refreshed.closure,
+    };
+  } catch (error) {
+    await removeUploadedFiles(uploaded);
+
+    throw error;
+  }
+}
+
+/**
+ * Removes one evidence photograph.
+ *
+ * The row goes first and the file only once that has committed: a
+ * deleted file with a surviving row would be a broken image on the
+ * page, whereas the reverse is a file nothing references.
+ */
+export async function deleteClosureItemEvidence({
+  userId,
+  closureId,
+  closureItemId,
+  evidenceId,
+}) {
+  const filePath = await withTransaction(
+    async (client) => {
+      await findEditableClosureItem({
+        userId,
+        closureId,
+        closureItemId,
+        client,
+      });
+
+      const evidence =
+        await closureRepository
+          .findEvidenceById(
+            evidenceId,
+            client,
+          );
+
+      if (
+        !evidence ||
+        Number(evidence.closureItemId) !==
+          Number(closureItemId)
+      ) {
+        throw new AppError(
+          "That evidence photograph was not found on this observation.",
+          404,
+          "EVIDENCE_NOT_FOUND",
+        );
+      }
+
+      return closureRepository
+        .deleteEvidenceById(
+          evidenceId,
+          client,
+        );
+    },
+  );
+
+  if (filePath) {
+    await removeUploadedFiles([filePath]);
+  }
+
+  const refreshed = await getClosureById({
+    userId,
+    closureId,
+  });
+
+  return {
+    message:
+      "Evidence photograph removed.",
+
+    closure: refreshed.closure,
+  };
+}
+
+/**
+ * Serves one evidence photograph to anybody entitled to read the
+ * closure it belongs to, which is the auditee, the auditor and the EHS
+ * Officer of the patrol. Files are never exposed statically.
+ */
+export async function getClosureItemEvidenceFile({
+  userId,
+  closureId,
+  closureItemId,
+  evidenceId,
+}) {
+  /*
+   * The access decision is the closure's, not the file's: if this
+   * returns nothing, the caller has no business seeing anything
+   * attached to it.
+   */
+  const closure =
+    await closureRepository
+      .findClosureByIdForUser({
+        closureId,
+        userId,
+      });
+
+  if (!closure) {
+    throw new AppError(
+      "The closure was not found.",
+      404,
+      "CLOSURE_ASSIGNMENT_NOT_FOUND",
+    );
+  }
+
+  const evidence =
+    await closureRepository
+      .findEvidenceById(evidenceId);
+
+  const belongsHere =
+    evidence &&
+    Number(evidence.closureItemId) ===
+      Number(closureItemId) &&
+    Number(evidence.closureId) ===
+      Number(closureId);
+
+  if (!belongsHere) {
+    throw new AppError(
+      "That evidence photograph was not found on this observation.",
+      404,
+      "EVIDENCE_NOT_FOUND",
+    );
+  }
+
+  const absolutePath = path.resolve(
+    process.cwd(),
+    evidence.filePath,
+  );
+
+  /*
+   * The stored path is ours, but resolving it and serving whatever
+   * comes out would turn a bad row into an arbitrary file read.
+   */
+  if (
+    !absolutePath.startsWith(
+      `${UPLOAD_DIRECTORY}${path.sep}`,
+    )
+  ) {
+    throw new AppError(
+      "The stored evidence path is invalid.",
+      500,
+      "INVALID_EVIDENCE_PATH",
+    );
+  }
+
+  try {
+    await access(absolutePath);
+  } catch {
+    throw new AppError(
+      "The evidence photograph file is unavailable.",
+      404,
+      "EVIDENCE_FILE_NOT_FOUND",
+    );
+  }
+
+  return {
+    absolutePath,
+
+    originalName:
+      evidence.originalName ??
+      "closure-evidence",
+
+    mimeType:
+      evidence.mimeType ??
+      "application/octet-stream",
   };
 }

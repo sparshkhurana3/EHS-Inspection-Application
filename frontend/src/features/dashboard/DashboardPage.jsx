@@ -15,6 +15,7 @@ import {
 } from "../../app/authProvider.jsx";
 
 import AuditStatusCards from "./AuditStatusCards.jsx";
+import DashboardMetrics from "./DashboardMetrics.jsx";
 import OfficerWeekCard from "./OfficerWeekCard.jsx";
 import WeeklySummary from "./WeeklySummary.jsx";
 import useDashboard from "./useDashboard.js";
@@ -111,6 +112,8 @@ export default function DashboardPage() {
   const {
     selectedPeriod,
     role,
+    metrics,
+    metricsPeriod,
     audits,
     nextAudit,
     nextWeek,
@@ -225,6 +228,11 @@ export default function DashboardPage() {
           {navigationMessage}
         </Alert>
       )}
+
+      <DashboardMetrics
+        metrics={metrics}
+        period={metricsPeriod}
+      />
 
       <PatrolCalendar
         year={selectedPeriod.year}

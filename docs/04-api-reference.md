@@ -69,13 +69,39 @@ Errors: `INVALID_CREDENTIALS` 401, `ACCOUNT_DISABLED` 403, `ACCOUNT_TEMPORARILY_
 
 **JWT**: HS256 with `JWT_SECRET`; claims `sub` (user id as string), `username`, `roles`, `tokenType: "access"`, `iss: ehs-inspection-api`, `aud: ehs-inspection-frontend`, `exp` from `JWT_EXPIRES_IN` (default 8h). The middleware ignores the `roles` claim and reloads roles from the DB.
 
+### `GET /api/auth/providers` — no auth
+Which sign-in methods this deployment offers, so the sign-in page knows whether to draw the SSO button. Deliberately public and deliberately uninformative.
+
+`200 { "providers": { "local": { "enabled": true }, "entra": { "enabled": false, "label": null } } }`
+
+When Entra is configured, `label` carries `ENTRA_BUTTON_LABEL` (default `"Login with Entra SSO"`).
+
+### `GET /api/auth/entra/start` — no auth
+**A browser navigation, not a fetch.** `302` to Microsoft, carrying `state`, `nonce` and a PKCE S256 challenge. Optional `?redirectTo=` must be an app-relative path or it is discarded.
+
+Every failure — Entra not configured, Entra unreachable — is also a `302`, to `{FRONTEND_ORIGIN}/sign-in?ssoError=<message>`, because the browser is on this URL and cannot be shown JSON. 5xx detail is masked here rather than by `errorHandler`.
+
+### `GET /api/auth/entra/callback?code=&state=` — no auth
+**A browser navigation.** Where Entra returns the person. Redeems the code server-side with the client secret, verifies the ID token, provisions or links the account, rewrites its roles, then `302`s to `{FRONTEND_ORIGIN}/auth/entra/callback?code=<one-time code>&redirectTo=<path>`.
+
+`state` is single-use: a replayed callback URL lands on `/sign-in?ssoError=…`. Entra's own refusals (`?error=access_denied`, a conditional access block) are turned into a readable message the same way.
+
+### `POST /api/auth/entra/exchange` — no auth
+Body `{ code }` — the one-time code from that redirect, valid two minutes and usable once.
+
+`200 { message, token, user, redirectTo }` — **the same envelope `POST /api/auth/login` returns**, so the frontend has one code path for both. Errors: `VALIDATION_ERROR` 400, `ENTRA_EXCHANGE_CODE_INVALID` 400 (unknown, expired or already spent), `ACCOUNT_DISABLED` 403, `ENTRA_NOT_CONFIGURED` 503.
+
+**Entra error codes** seen on the redirect routes: `ENTRA_UNAVAILABLE` 503, `ENTRA_TOKEN_EXCHANGE_FAILED` 401, `ENTRA_ID_TOKEN_INVALID` 401, `ENTRA_NONCE_MISMATCH` 401, `ENTRA_TENANT_NOT_ALLOWED` 403, `ENTRA_NO_APPLICATION_ROLE` 403, `ENTRA_ACCOUNT_CONFLICT` 409, `ENTRA_LOGIN_SESSION_INVALID` 400. Microsoft's own diagnostics are logged, never returned, because `errorHandler` serialises `details` to the browser.
+
 ## Dashboard
 
 ### `GET /api/dashboard?year=&month=` — authenticate (any role)
 
 `year` 2020–2100, `month` 1–12; both default to the current UTC year/month. Role branch is decided in the service: first role in {`EHS_OFFICER`, `HOD`, `PLANT_HEAD`, `ADMIN`} → management, else `USER`.
 
-Common fields: `role`, `period {year, month}`, `metricsPeriod {startDate, endDate}` (always the **current** year), `audits[]` for the requested month.
+Common fields: `role`, `period {year, month}`, `metricsPeriod`, `metrics`, `audits[]` for the requested month.
+
+**`metricsPeriod`** `{ year, startDate, endDate, scopeName }` — the window the metrics cover. Always **the current year to date**, independent of the `year`/`month` being browsed: paging the calendar moves `audits[]` and `period`, never the metrics. `endDate` is today, or 31 December once that year has passed. `scopeName` is the plant the figures cover, or `null` for a personal scope or a manager with no plant set.
 
 `<audit>`:
 ```json
@@ -90,10 +116,24 @@ Common fields: `role`, `period {year, month}`, `metricsPeriod {startDate, endDat
 USER branch adds:
 - `nextAudit`: first current-week audit (Mon–Sun UTC, **always the real current week**, not the requested month) with a pending action, spread with `taskState: "SCHEDULED", taskCompleted: false`; or `{ taskState: "TASK_COMPLETED", taskCompleted: true, weekLabel, message }` if the week has audits but nothing pending; or `null`.
   Pending = auditor without a report, or auditee with an open report (`OPEN|PENDING_AUDITEE_ACTION|REEXAMINATION_REQUIRED`) and no closure row of their own.
-- `metrics`: `{ audits: { conducted, total }, closures: { requested, actual } }` for the current year. `actual` counts `APPROVED AND closed_at IS NOT NULL`, which nothing produces today, so it is always 0.
+- `metrics` (`scope: "SELF"`): what this person owes and has done, **split by the side of the patrol they were on**, because the two are different jobs and merging them would report an auditee as having conducted inspections somebody else carried out.
+  ```json
+  { "scope": "SELF",
+    "inspections": { "conducted", "due" },
+    "closures":    { "approved", "raised", "assigned" } }
+  ```
+  `inspections.due` counts patrols where they are **auditor**, scheduled on or before today; `conducted` those with any observation report filed ("no observation to record" counts — the inspection happened). `closures.raised` is the closures actually raised for them as auditee and `approved` those the officer signed off; `assigned` is every patrol they are auditee on, which is larger because a closure only exists once the auditor files a report with findings.
 - `nextWeek: null`.
 
-Management branch adds `nextAudit: null`, no `metrics`, and `nextWeek`: `{ weekNumber, weekLabel: "Week N audit", startDate, endDate, totalAudits, audits[] }` or `null`.
+Management branch adds `nextAudit: null`, `nextWeek` (`{ weekNumber, weekLabel: "Week N audit", startDate, endDate, totalAudits, audits[] }` or `null`), and:
+- `metrics` (`scope: "PLANT"`), scoped to the manager's own plant, or every plant when they have none:
+  ```json
+  { "scope": "PLANT",
+    "inspections":       { "conducted", "due" },
+    "observationReports":{ "total", "withFindings", "withoutFindings" },
+    "closureReports":    { "raised", "approved" } }
+  ```
+  `inspections.due` is every non-cancelled patrol scheduled on or before today this year — a cancelled patrol was never owed, so it counts on neither side. One report per patrol is a unique constraint, so `inspections.conducted` and `observationReports.total` are necessarily the same number; the split into `withFindings` / `withoutFindings` is what makes the second tile say something the first does not. `closureReports.raised` equals `withFindings`, since a closure is created for exactly those, so the useful figure there is `approved`.
 
 Errors: `INVALID_DASHBOARD_YEAR`, `INVALID_DASHBOARD_MONTH` (400, only if the validator is bypassed).
 
@@ -112,10 +152,10 @@ Each assignment carries `id, scheduledDate, weekNumber, unitId/unitNumber/unitNa
 | `isOverdue` | no report yet and today is past `dueDate` (does **not** block submission) |
 | `isFromEarlierWeek` | scheduled before this week's Monday |
 | `reportStatus` | `OPEN` (no report) \| `CLOSED` (a report exists) |
-| `report` | `null`, or `<report>` with `observationCount`, `highestRisk`, `closureStatus`, `ticketStatus` |
+| `report` | `null`, or `<report>` with `observationCount`, `highestRisk`, `closureStatus` |
 
 ### `GET /api/observations/history?filter=`
-The past 6 months of reports the caller may see: their own patrols, or every report at their plant for `EHS_OFFICER`/`HOD`/`PLANT_HEAD`/`ADMIN`. `filter` is `all` (default), `closed` (latest ticket `CLOSED` — the product definition of closed via ticket), `no_observations`, or `in_progress`; anything else is `400 VALIDATION_ERROR`.
+The past 6 months of reports the caller may see: their own patrols, or every report at their plant for `EHS_OFFICER`/`HOD`/`PLANT_HEAD`/`ADMIN`. `filter` is `all` (default), `closed` (no observations recorded, **or** the closure approved — a report that can no longer come back to anybody), `no_observations`, or `in_progress`; anything else is `400 VALIDATION_ERROR`.
 
 `200 { windowMonths: 6, filter, count, reports[] }`, newest audit first, capped at 300.
 
@@ -125,7 +165,7 @@ Body `{ patrolId }`. Closes an open audit the caller audits with nothing to reco
 `201 { message, report }`. Errors: `ASSIGNED_PATROL_NOT_FOUND` 404, `OBSERVATION_REPORT_ALREADY_EXISTS` 409, `PATROL_STATUS_NOT_ELIGIBLE` 409, `PATROL_AUDITEE_NOT_ASSIGNED` 409.
 
 ### `GET /api/observations/:reportId/items/:itemId/photograph`
-One observation's photograph. Same access rule as the report detail: auditor, auditee, the patrol's EHS Officer, the Action HOD of its ticket, or plant management. Same headers and errors as the report-level photograph route below.
+One observation's photograph. Same access rule as the report detail: auditor, auditee, the patrol's EHS Officer, or plant management. Same headers and errors as the report-level photograph route below.
 
 ### `POST /api/observations` — `multipart/form-data`
 
@@ -159,7 +199,7 @@ Errors: `OBSERVATION_PHOTOGRAPH_NOT_FOUND` 404, `OBSERVATION_PHOTOGRAPH_FILE_NOT
 
 ## Closures — all routes `authenticate` + `authorize("USER")`
 
-`<closure>` also carries `items[]` — one entry per observation, `{ id, sequenceNumber, observation: { areaName, category, description, riskCategory }, actionPlan, targetDate, actionHodId, actionHodName, ticket: { id, status, decision, closureRound, closureDate } | null, canEdit, ticketDisplayStatus }` — plus `itemCount`, `closedTicketCount`, and `canSubmitForClosure` (true only when every observation has a plan and every ticket is `CLOSED`). `displayStatus` is `Open` / `In Progress` / `Pending Approval` / `Closed`.
+`<closure>` also carries `items[]` — one entry per observation, `{ id, sequenceNumber, observation: { areaName, category, description, riskCategory }, actionPlan, targetDate, actionPlanSavedAt, evidence: [{ id, originalName, mimeType, size, uploadedAt }], evidenceCount, canEdit, canAddEvidence }` — plus `itemCount`, `plannedItemCount`, `evidenceCount`, `maxEvidencePerObservation` (3), and `canSubmitForClosure` (true once every observation has a plan; evidence does not gate it). `displayStatus` is `Open` / `In Progress` / `Pending Approval` / `Closed`.
 
 `<closure>` (`closure.repository.mapClosure` + `closure.service.createClosureResponse`):
 ```json
@@ -167,25 +207,35 @@ Errors: `OBSERVATION_PHOTOGRAPH_NOT_FOUND` 404, `OBSERVATION_PHOTOGRAPH_FILE_NOT
   "unitNumber", "unitName", "zoneNumber", "zoneName", "plantLocation", "observationLocation",
   "auditorName", "auditeeName", "ehsOfficerName", "findingDate", "category", "photographPath",
   "photographOriginalName", "observationDescription", "riskCategory", "observationSubmittedAt",
-  "actionPlan", "targetDate", "responsibleHodName", "completionDate", "actionPlanSavedAt",
-  "submittedForClosureAt", "closedAt",
+  "actionPlan", "targetDate", "completionDate", "actionPlanSavedAt",
+  "submittedForClosureAt", "closedAt", "approvalIteration", "wasReturned",
   "displayStatus", "canEditActionPlan", "canSubmitForClosure" }
 ```
-`displayStatus`: `OPEN`→Open, `IN_PROGRESS|REEXAMINATION_REQUIRED`→In Progress, `SUBMITTED_FOR_CLOSURE|PENDING_EHS_APPROVAL`→Sent for Closure, `APPROVED|CLOSED`→Closed. `canEditActionPlan` = status ∈ {OPEN, IN_PROGRESS, REEXAMINATION_REQUIRED}. `canSubmitForClosure` = `IN_PROGRESS` and action plan, target date, HOD all present.
+`displayStatus`: `OPEN|REEXAMINATION_REQUIRED`→Open, `IN_PROGRESS`→In Progress, `SUBMITTED_FOR_CLOSURE|PENDING_EHS_APPROVAL`→Pending Approval, `APPROVED|CLOSED`→Closed. `canEditActionPlan` = status ∈ {OPEN, IN_PROGRESS, REEXAMINATION_REQUIRED}, and every item's `canEdit` is the same value — nothing freezes one observation while the rest stay open.
 
 ### `GET /api/closures/current`
 The caller's single highest-priority closure (`requested_by = caller`, status in OPEN/IN_PROGRESS/SUBMITTED_FOR_CLOSURE/REEXAMINATION_REQUIRED; order OPEN → IN_PROGRESS → REEXAMINATION_REQUIRED → SUBMITTED_FOR_CLOSURE, then scheduled date).
 `200 { "closure": <closure> | null }`
 
-### `GET /api/closures/:closureId/departments`
-The departments at this closure's plant that have an Action Team HOD, `200 { plantName, departments: [{ id, name, code, hodId, hodName }] }`. Replaces `/action-hods`.
-
 ### `PATCH /api/closures/:closureId/items/:closureItemId/action-plan`
-Saves **one observation's** action plan and assigns it to a department. Body `{ actionPlan (≤255 words), targetDate (YYYY-MM-DD), departmentId }`; the department must have an active `ACTION_HOD` at the closure's plant, and the ticket goes to that HOD, and the name stored is derived from that user, never accepted from the client.
+Saves **one observation's** action plan. Body `{ actionPlan (≤255 words), targetDate (YYYY-MM-DD) }`.
 
-In one transaction: lock the closure → check the item belongs to it and is still editable → save the plan → mirror item #1 onto `closure_requests` → open or refresh that item's ticket for the current `approval_iteration` → recompute the closure's derived status.
+In one transaction: lock the closure → check the item belongs to it and is still editable → save the plan → mirror item #1 onto `closure_requests` → recompute the closure's derived status.
 
-`200 { message, closure }` with the full `items[]`. Errors: `CLOSURE_ASSIGNMENT_NOT_FOUND` 404, `CLOSURE_ITEM_NOT_FOUND` 404, `CLOSURE_ACTION_PLAN_LOCKED` 409 (closure past editing), `CLOSURE_ITEM_LOCKED` 409 (this observation's department already decided), `INVALID_ACTION_HOD` 400, plus the action-plan validation codes.
+`200 { message, closure }` with the full `items[]`. Errors: `CLOSURE_ASSIGNMENT_NOT_FOUND` 404, `CLOSURE_ITEM_NOT_FOUND` 404, `CLOSURE_ACTION_PLAN_LOCKED` 409, plus the action-plan validation codes.
+
+### `POST /api/closures/:closureId/items/:closureItemId/evidence`
+`multipart/form-data`, field **`evidence`**, 1–3 JPEG/PNG/SVG files of 10 MB each: photographs proving this observation's action plan was carried out. Auditee only, and only while the closure is editable.
+
+The three-per-observation cap is checked inside the transaction against a locked count, so concurrent uploads cannot exceed it together. Files multer has already written are deleted again on any failure.
+
+`201 { message, closure }`. Errors: `EVIDENCE_REQUIRED` 400, `TOO_MANY_EVIDENCE_IMAGES` 400, `UNSUPPORTED_EVIDENCE_IMAGE` 400, `EVIDENCE_IMAGE_TOO_LARGE` 400, `CLOSURE_ACTION_PLAN_LOCKED` 409, `CLOSURE_ITEM_NOT_FOUND` 404.
+
+### `DELETE /api/closures/:closureId/items/:closureItemId/evidence/:evidenceId`
+Removes one photograph. The row goes first and the file only after the commit. `200 { message, closure }`. Errors: `EVIDENCE_NOT_FOUND` 404, `CLOSURE_ACTION_PLAN_LOCKED` 409.
+
+### `GET /api/closures/:closureId/items/:closureItemId/evidence/:evidenceId`
+The image bytes, `Content-Disposition: inline`, `Cache-Control: private, max-age=300`. Authorised by the **closure's** read rules, so the auditee, auditor, EHS Officer and plant management all see it. Never served statically; the stored path is checked to sit inside the upload directory first. Errors: `CLOSURE_ASSIGNMENT_NOT_FOUND` 404, `EVIDENCE_NOT_FOUND` 404, `EVIDENCE_FILE_NOT_FOUND` 404, `INVALID_EVIDENCE_PATH` 500.
 
 
 ### `POST /api/closures/:closureId/submit`
@@ -193,8 +243,16 @@ No body. `closureId` is **not validated** (route passes `validate` with no rules
 `200 { "message": "Report sent for closure successfully.", "closure": <closure> }`
 Errors: `CLOSURE_ASSIGNMENT_NOT_FOUND` 404, `CLOSURE_NOT_IN_PROGRESS` 409, `INCOMPLETE_CLOSURE_REPORT` 400, `CLOSURE_STATUS_CHANGED` 409, `CLOSURE_SUBMISSION_FAILED` 409, `SUBMITTED_CLOSURE_NOT_FOUND` 500.
 
-### Not implemented (but called by the frontend)
-`GET /closures/pending-approvals`, `GET /closures/:id/approval`, `POST /closures/:id/approve`, `POST /closures/:id/reject`. `closure.validator.js` already exports `closureReviewValidationRules` and `rejectClosureValidationRules` for them. Proposed contract is in the [backlog](09-feature-refinement-backlog.md#approval-workflow-design-r6-second-half).
+### `GET /api/closures/pending-approvals` — `MANAGEMENT_ROLES`
+The EHS Officer's review queue: closures in `SUBMITTED_FOR_CLOSURE` on patrols they own or at their plant. `200 { closures: [<closure>] }`.
+
+### `POST /api/closures/:closureId/approve` — `MANAGEMENT_ROLES`
+Body `{ reviewComments }` optional. In one transaction the closure → `APPROVED`, the patrol → `COMPLETED` and the report → `CLOSED`. **This is the only path that ends an inspection that had findings.**
+
+### `POST /api/closures/:closureId/reject` — `MANAGEMENT_ROLES`
+Body `{ reviewComments }` **required** (3–1000 chars, `REVIEW_COMMENTS_REQUIRED` 400). Closure → `REEXAMINATION_REQUIRED` with `approval_iteration` advanced, patrol and report likewise, and every observation open for rework.
+
+Both: `CLOSURE_ASSIGNMENT_NOT_FOUND` 404, `CLOSURE_NOT_AWAITING_APPROVAL` 409, `CLOSURE_STATUS_CHANGED` 409 (another reviewer got there first).
 
 ## Patrols — both routes `authenticate` + `authorize("EHS_OFFICER")` (ADMIN not accepted)
 
@@ -208,6 +266,22 @@ Errors: `CLOSURE_ASSIGNMENT_NOT_FOUND` 404, `CLOSURE_NOT_IN_PROGRESS` 409, `INCO
   "auditees":  [{ "id", "fullName", "username", "email" }] }
 ```
 Plants with the same name are de-duplicated (most patrols → most units → highest id). Auditors/auditees are active users holding role code `AUDITOR` / `AUDITEE`, which only the seed scripts create.
+
+### `GET /api/patrols/inspection-report`
+The zone-by-week inspection report as an `.xlsx` download, scoped to the officer's own plant and covering **the current year up to today**. Declared before `/:patrolId/assignment` so the literal path is never parsed as a patrol id.
+
+Responds with the spreadsheet bytes, `Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`, `Content-Disposition: attachment; filename="inspection-report-<plant>-<date>.xlsx"`, and `Access-Control-Expose-Headers: Content-Disposition` so a cross-origin fetch can read the filename.
+
+Sheet layout: three merged title rows (title, plant and period, legend), then a header row, then one row per zone. Fixed columns are Unit, Zone, Auditor, Auditee, Done, Scheduled; after them one column per inspection week, headed `W<iso>` and the Monday's date. Panes freeze at `G5` and an autofilter covers the fixed columns.
+
+Each week cell is green (`Done`), red (`Not done`) or grey (`–`, nothing scheduled that week). **Colour and text both carry the status**, so the sheet survives printing in black and white. A week where a zone had several audits is green only when all of them were filed.
+
+- **Conducted** means an observation report exists — "no observation to record" counts, the inspection happened.
+- **Cancelled patrols are excluded** from both sides: one that was never owed is not a miss.
+- **Only weeks with at least one patrol scheduled somewhere in the plant become columns**, so the sheet does not carry empty columns for the stretch before the roster was first uploaded. Likewise a zone with nothing scheduled all year is left out rather than shown as a row of grey.
+- **Auditor and auditee come from the zone's most recent inspection on or before today**, falling back to the next scheduled one for a zone never yet audited. That is deliberately *who last audited it*, which can differ from who the roster has for upcoming weeks; the sheet's legend says so.
+
+Errors: `OFFICER_LOCATION_NOT_SET` 403 (no plant on the account), `INSUFFICIENT_PERMISSIONS` 403 (not `EHS_OFFICER`/`ADMIN` — an `HOD` or `PLANT_HEAD` is refused, the same as every other planning route).
 
 ### `POST /api/patrols`
 Body: `location`, `unit`, `zone`, `areaDetail` (strings), `scheduledDate` (`YYYY-MM-DD`, today or later by lexical compare against server-local today), `auditorId`, `auditeeId` (ints, must differ).
@@ -223,26 +297,3 @@ Transaction: caller must still hold `EHS_OFFICER` → auditor has role `AUDITOR`
               "ehsOfficerId", "ehsOfficerName", "status", "createdAt", "updatedAt" } }
 ```
 Errors: `SCHEDULED_DATE_REQUIRED`, `INVALID_SCHEDULED_DATE`, `AUDIT_DATE_IN_PAST`, `INSPECTION_{LOCATION,UNIT,ZONE,AREA}_REQUIRED`, `INVALID_AUDITOR_ID`, `INVALID_AUDITEE_ID`, `AUDITOR_AUDITEE_MUST_DIFFER`, `INVALID_AUDITOR`, `INVALID_AUDITEE`, `INSPECTION_LOCATION_NOT_FOUND`, `UNIT_NOT_FOUND_FOR_LOCATION`, `ZONE_NOT_FOUND_FOR_UNIT`, `AREA_DETAIL_NOT_FOUND_FOR_ZONE` (400); `EHS_OFFICER_REQUIRED` 403; ~~`AUDITOR_SCHEDULING_CONFLICT`~~ (removed), `AUDITEE_SCHEDULING_CONFLICT`, `AUDIT_SCHEDULING_CONFLICT` 409; `AUDIT_SCHEDULING_FAILED`, `SCHEDULED_AUDIT_NOT_FOUND` 500.
-
-
-## Ticket approval and history (migration 016)
-
-`<ticket>` gains `departmentId`/`departmentName`, `resolutionComments`, `submittedForApprovalAt`, `approvedBy`/`approvedByName`/`approvedAt`/`approvalComments`, `reopenComments`/`reopenedAt`/`reopenCount`, and the flags `canSubmitResolution`, `awaitingApproval`, `pendingOutcome` (`RESOLUTION`|`REJECTION`), `wasReopened`. `displayStatus` adds **Pending Approval**.
-
-### `POST /api/tickets/:ticketId/reject` — `ACTION_HOD`
-Now moves `OPEN` → `PENDING_APPROVAL` with `decision REJECTED` (comments required); it no longer closes the ticket.
-
-### `POST /api/tickets/:ticketId/submit-resolution` — `ACTION_HOD`
-Replaces `/close`. `IN_PROGRESS` → `PENDING_APPROVAL`. Body `{ resolutionComments (3–1000, required), correctiveActionTypeId (optional, corrects the type of work) }`; at least one evidence photograph must already be attached. Errors: `RESOLUTION_COMMENTS_REQUIRED`, `EVIDENCE_REQUIRED_TO_CLOSE` 400, `TICKET_NOT_IN_PROGRESS` 409.
-
-### `GET /api/tickets/history?filter=` — `ACTION_HOD`
-Six months of the caller's own tickets, any status. `filter` is `all` (default), `open`, `in_progress`, `pending_approval`, `closed`. `200 { windowMonths: 6, filter, count, tickets[] }`, newest first, capped at 300.
-
-### `GET /api/tickets/pending-approvals` — `MANAGEMENT_ROLES`
-Tickets awaiting this officer: those on patrols they own, or at their plant. `200 { count, tickets[] }` with evidence.
-
-### `POST /api/tickets/:ticketId/approve` — `MANAGEMENT_ROLES`
-`PENDING_APPROVAL` → `CLOSED`, `closure_date` today, keeping the HOD's decision. Body `{ comments }` optional.
-
-### `POST /api/tickets/:ticketId/reopen` — `MANAGEMENT_ROLES`
-`PENDING_APPROVAL` → `OPEN`, clearing `decision`, `comments`, `corrective_action_type_id`, `completion_notes` and **every evidence row and file**; `reopen_count` increments. Body `{ comments }` **required** (`REOPEN_COMMENTS_REQUIRED` 400). Both routes 404 `TICKET_NOT_FOUND` outside the caller's scope and 409 `TICKET_NOT_AWAITING_APPROVAL` otherwise; both recompute the closure's status in the same transaction.

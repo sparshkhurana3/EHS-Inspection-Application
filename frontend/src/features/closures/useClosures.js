@@ -7,13 +7,15 @@ import {
 
 import {
   approveClosureReport,
-  fetchDepartmentOptions,
+  deleteClosureEvidence,
   fetchAuditeeClosures,
   fetchClosureById,
+  fetchClosureEvidenceBlob,
   fetchPendingApprovals,
   rejectClosureReport,
   saveClosureItem,
   submitClosureReport,
+  uploadClosureEvidence,
 } from "./closure.service.js";
 
 import {
@@ -26,6 +28,10 @@ import {
 } from "../../lib/errorMessage.js";
 
 export const MAX_ACTION_PLAN_WORDS = 255;
+
+export const MAX_EVIDENCE_FILES = 3;
+
+const MAX_EVIDENCE_BYTES = 10 * 1024 * 1024;
 
 export function countWords(value) {
   const trimmed = String(value ?? "").trim();
@@ -209,74 +215,9 @@ export function useClosureDetail(closureId) {
 }
 
 /**
- * The departments this closure's observations can be assigned to,
- * scoped to its own plant, each with the Action Team HOD the ticket
- * will go to. Loaded once per closure and shared by every observation.
- */
-export function useDepartmentOptions(closureId) {
-  const [options, setOptions] = useState([]);
-  const [plantName, setPlantName] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    if (!closureId) {
-      return;
-    }
-
-    let cancelled = false;
-
-    setLoading(true);
-    setError("");
-
-    fetchDepartmentOptions(closureId)
-      .then((result) => {
-        if (cancelled) {
-          return;
-        }
-
-        setOptions(result?.departments ?? []);
-        setPlantName(result?.plantName ?? null);
-      })
-      .catch((requestError) => {
-        if (cancelled) {
-          return;
-        }
-
-        setError(getErrorMessage(requestError));
-        setOptions([]);
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [closureId]);
-
-  return {
-    options,
-    plantName,
-    loading,
-    error,
-  };
-}
-
-/**
- * Action plan state for one closure.
- *
- * After a rejection the server returns a null action plan with the
- * target date intact, so the form opens with an empty plan field and
- * the original commitment still in place.
- */
-/**
  * One observation's action plan. Each observation is an independent
- * unit — its own plan, its own department, its own ticket — so the form
- * state is per item and keyed to it, and saving one does not touch the
- * others.
+ * unit with its own plan and its own evidence, so the form state is per
+ * item and keyed to it, and saving one does not touch the others.
  */
 export function useClosureItemForm({
   closureId,
@@ -286,7 +227,6 @@ export function useClosureItemForm({
   const [values, setValues] = useState({
     actionPlan: "",
     targetDate: "",
-    departmentId: "",
   });
 
   const [saving, setSaving] = useState(false);
@@ -298,9 +238,6 @@ export function useClosureItemForm({
       targetDate: toDateInputValue(
         item?.targetDate,
       ),
-      departmentId: item?.departmentId
-        ? String(item.departmentId)
-        : "",
     });
 
     setError("");
@@ -308,7 +245,6 @@ export function useClosureItemForm({
     item?.id,
     item?.actionPlan,
     item?.targetDate,
-    item?.departmentId,
   ]);
 
   const updateField = useCallback(
@@ -342,11 +278,10 @@ export function useClosureItemForm({
 
     if (
       !values.actionPlan.trim() ||
-      !values.targetDate ||
-      !values.departmentId
+      !values.targetDate
     ) {
       setError(
-        "Complete the action plan, target date, and department for this observation.",
+        "Complete the action plan and target date for this observation.",
       );
 
       return null;
@@ -361,7 +296,6 @@ export function useClosureItemForm({
         closureItemId: item.id,
         actionPlan: values.actionPlan,
         targetDate: values.targetDate,
-        departmentId: values.departmentId,
       });
 
       await onSaved?.();
@@ -390,8 +324,206 @@ export function useClosureItemForm({
 }
 
 /**
+ * The evidence photographs on one observation: attaching, removing,
+ * and getting a viewable URL for each.
+ *
+ * The photographs come from an authenticated route, so they cannot be
+ * used directly as an <img src>. Each is fetched as a blob once and
+ * held as an object URL, which is revoked when the component goes away
+ * so the browser can release the memory.
+ */
+export function useClosureEvidence({
+  closureId,
+  item,
+  onChanged,
+}) {
+  const [previews, setPreviews] = useState({});
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const evidence = item?.evidence ?? [];
+
+  /*
+   * Compared as a string so the effect re-runs when a photograph is
+   * added or removed, but not on every re-render that rebuilds an
+   * equivalent array.
+   */
+  const evidenceKey = evidence
+    .map((entry) => entry.id)
+    .join(",");
+
+  useEffect(() => {
+    if (!closureId || !item?.id) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    const objectUrls = [];
+
+    Promise.all(
+      evidence.map(async (entry) => {
+        try {
+          const blob =
+            await fetchClosureEvidenceBlob({
+              closureId,
+              closureItemId: item.id,
+              evidenceId: entry.id,
+            });
+
+          const url =
+            URL.createObjectURL(blob);
+
+          objectUrls.push(url);
+
+          return [entry.id, url];
+        } catch {
+          /*
+           * One photograph failing to load must not blank the others,
+           * so it is simply left without a preview.
+           */
+          return null;
+        }
+      }),
+    ).then((entries) => {
+      if (cancelled) {
+        objectUrls.forEach((url) =>
+          URL.revokeObjectURL(url),
+        );
+
+        return;
+      }
+
+      setPreviews(
+        Object.fromEntries(
+          entries.filter(Boolean),
+        ),
+      );
+    });
+
+    return () => {
+      cancelled = true;
+
+      objectUrls.forEach((url) =>
+        URL.revokeObjectURL(url),
+      );
+    };
+  }, [closureId, item?.id, evidenceKey]);
+
+  const upload = useCallback(
+    async (fileList) => {
+      const files = Array.from(
+        fileList ?? [],
+      );
+
+      if (files.length === 0 || busy) {
+        return;
+      }
+
+      /*
+       * Checked here as well as on the server so somebody who picks
+       * ten photographs is told immediately, rather than after
+       * uploading them all.
+       */
+      const room =
+        MAX_EVIDENCE_FILES - evidence.length;
+
+      if (files.length > room) {
+        setError(
+          room === 0
+            ? `This observation already has ${MAX_EVIDENCE_FILES} photographs.`
+            : `Only ${room} more photograph${
+                room === 1 ? "" : "s"
+              } can be attached to this observation.`,
+        );
+
+        return;
+      }
+
+      const tooLarge = files.find(
+        (file) =>
+          file.size > MAX_EVIDENCE_BYTES,
+      );
+
+      if (tooLarge) {
+        setError(
+          `${tooLarge.name} is larger than 10 MB.`,
+        );
+
+        return;
+      }
+
+      setBusy(true);
+      setError("");
+
+      try {
+        await uploadClosureEvidence({
+          closureId,
+          closureItemId: item.id,
+          files,
+        });
+
+        await onChanged?.();
+      } catch (requestError) {
+        setError(
+          getErrorMessage(requestError),
+        );
+      } finally {
+        setBusy(false);
+      }
+    },
+    [
+      closureId,
+      item?.id,
+      evidence.length,
+      busy,
+      onChanged,
+    ],
+  );
+
+  const remove = useCallback(
+    async (evidenceId) => {
+      if (busy) {
+        return;
+      }
+
+      setBusy(true);
+      setError("");
+
+      try {
+        await deleteClosureEvidence({
+          closureId,
+          closureItemId: item.id,
+          evidenceId,
+        });
+
+        await onChanged?.();
+      } catch (requestError) {
+        setError(
+          getErrorMessage(requestError),
+        );
+      } finally {
+        setBusy(false);
+      }
+    },
+    [closureId, item?.id, busy, onChanged],
+  );
+
+  return {
+    evidence,
+    previews,
+    busy,
+    error,
+    maxFiles: MAX_EVIDENCE_FILES,
+    remainingSlots:
+      MAX_EVIDENCE_FILES - evidence.length,
+    upload,
+    remove,
+  };
+}
+
+/**
  * Sending the whole closure to the EHS Officer, once every observation
- * has a plan and every department has resolved its ticket.
+ * has an action plan.
  */
 export function useClosureSubmission({
   closureId,

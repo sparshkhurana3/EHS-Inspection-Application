@@ -2,24 +2,21 @@ import Alert from "../../components/Alert.jsx";
 
 import { formatDate } from "../../lib/errorMessage.js";
 
-import TicketStatusCard from "../tickets/TicketStatusCard.jsx";
+import ClosureEvidencePanel from "./ClosureEvidencePanel.jsx";
 
 import { useClosureItemForm } from "./useClosures.js";
 
 /**
  * One observation's action plan: what was found, what will be done
- * about it, which department will do it, and the ticket that department
- * is working — all in one block, so a report with several observations
- * reads as several independent units of work.
+ * about it, and the photographs proving it was done — all in one
+ * block, so a report with several observations reads as several
+ * independent units of work.
  */
 export default function ActionPlanItemForm({
   closureId,
   item,
   total,
   photograph,
-  departmentOptions,
-  departmentOptionsLoading,
-  plantName,
   onSaved,
 }) {
   const form = useClosureItemForm({
@@ -58,19 +55,11 @@ export default function ActionPlanItemForm({
           </p>
         </div>
 
-        {item.ticketDisplayStatus ? (
-          <span
-            className={`closure-status-chip ticket-status-${String(
-              item.ticket?.status ?? "",
-            ).toLowerCase()}`}
-          >
-            Ticket: {item.ticketDisplayStatus}
-          </span>
-        ) : (
-          <span className="closure-status-chip">
-            No ticket yet
-          </span>
-        )}
+        <span className="closure-status-chip">
+          {item.actionPlan
+            ? "Action plan saved"
+            : "Action plan needed"}
+        </span>
       </header>
 
       <div className="closure-item-observation">
@@ -148,76 +137,6 @@ export default function ActionPlanItemForm({
           />
         </div>
 
-        <div className="form-field">
-          <label
-            htmlFor={`departmentId${suffix}`}
-          >
-            Assign to department
-          </label>
-
-          {editable ? (
-            <>
-              <select
-                id={`departmentId${suffix}`}
-                value={form.values.departmentId}
-                disabled={
-                  form.saving ||
-                  departmentOptionsLoading ||
-                  departmentOptions.length === 0
-                }
-                onChange={(event) =>
-                  form.updateField(
-                    "departmentId",
-                    event.target.value,
-                  )
-                }
-              >
-                <option value="">
-                  {departmentOptionsLoading
-                    ? "Loading..."
-                    : "Select the responsible department"}
-                </option>
-
-                {departmentOptions.map(
-                  (department) => (
-                    <option
-                      key={department.id}
-                      value={department.id}
-                    >
-                      {department.name}
-                      {department.hodName
-                        ? ` — ${department.hodName}`
-                        : ""}
-                    </option>
-                  ),
-                )}
-              </select>
-
-              {!departmentOptionsLoading &&
-              departmentOptions.length === 0 ? (
-                <p className="closure-empty-note">
-                  No department at{" "}
-                  {plantName ?? "this location"}{" "}
-                  has an Action Team HOD
-                  registered yet. Ask the
-                  administrator to add one before
-                  saving the plan.
-                </p>
-              ) : null}
-            </>
-          ) : (
-            <p>
-              {item.departmentName
-                ? `${item.departmentName}${
-                    item.actionHodName
-                      ? ` — ${item.actionHodName}`
-                      : ""
-                  }`
-                : "Not yet assigned."}
-            </p>
-          )}
-        </div>
-
         {editable ? (
           <div className="closure-form-actions">
             <button
@@ -243,14 +162,18 @@ export default function ActionPlanItemForm({
           </div>
         ) : (
           <p className="closure-item-disabled-note">
-            {item.ticket
-              ? "A decision has already been recorded for this observation, so its action plan can no longer be changed."
-              : "This closure is waiting for the EHS Officer and cannot be edited."}
+            This closure is with the EHS Officer
+            and cannot be edited.
           </p>
         )}
       </form>
 
-      <TicketStatusCard ticket={item.ticket} />
+      <ClosureEvidencePanel
+        closureId={closureId}
+        item={item}
+        editable={editable}
+        onChanged={onSaved}
+      />
     </section>
   );
 }

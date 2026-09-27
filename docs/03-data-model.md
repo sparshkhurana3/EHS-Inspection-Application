@@ -31,12 +31,23 @@ All ids are `BIGSERIAL`. All timestamps are `TIMESTAMPTZ`. Column names are `sna
 
 **`roles`** — `id`, `code` (unique: `USER`, `EHS_OFFICER`, `HOD`, `PLANT_HEAD`, `ADMIN`; seeds also add `AUDITOR`, `AUDITEE`), `name`, `created_at`.
 
-**`users`** — `id`, `full_name`, `username`, `email`, `password_hash` (bcrypt, nullable for future SSO), `authentication_source` (`LOCAL` | `ENTRA`), `is_active`, `failed_login_attempts`, `locked_until`, `last_login_at`, `created_at`, `updated_at`.
+**`users`** — `id`, `full_name`, `username`, `email`, `password_hash` (bcrypt, **nullable**), `authentication_source` (`LOCAL` | `ENTRA`), `entra_object_id` (migration 016 → 017; the immutable Entra `oid` claim, unique where not null), `is_active`, `failed_login_attempts`, `locked_until`, `last_login_at`, `created_at`, `updated_at`, plus `plant_id`. (`department_id` existed to put an Action Team HOD in a department and was dropped with the ticket system in migration 018.)
+
+Two columns carry the whole SSO story and are easy to misread:
+
+- `password_hash` is null for an account Entra provisioned, and **null is what bars it from the password form**. The failsafe check is on this column, not on `authentication_source`.
+- `authentication_source` records where the account *originated* and is never flipped by SSO. An account created locally and later linked to a directory identity stays `LOCAL`, keeps its password, and so keeps both ways in — which is exactly what a break-glass account needs.
+
+Matching a directory identity to a row goes by `entra_object_id` first and by email only as a fallback, and email is trusted for that solely because the token's `tid` has already been pinned to the configured tenant.
 Unique on `LOWER(username)` and `LOWER(email)`. The `ENTRA` value reserves Microsoft Entra ID SSO; nothing implements it.
 
 **`user_roles`** — `(user_id, role_id)` PK, `assigned_at`. `ON DELETE CASCADE` from users, `RESTRICT` from roles.
 
-**`authentication_events`** — audit log written on every signup, login, and failed login: `user_id` (nullable), `username_attempted`, `event_type` (`SIGNUP` | `LOGIN` | `LOGOUT` | `LOGIN_FAILURE`), `success`, `ip_address` (`INET`), `user_agent`, `event_timestamp`. `LOGOUT` is never written because logout is client-side.
+**`authentication_events`** — audit log written on every signup, login, and failed login, by both sign-in routes: `user_id` (nullable), `username_attempted`, `event_type` (`SIGNUP` | `LOGIN` | `LOGOUT` | `LOGIN_FAILURE`), `success`, `ip_address` (`INET`), `user_agent`, `event_timestamp`. `LOGOUT` is never written because logout is client-side. An Entra sign-in writes `SIGNUP` on the round that provisions the account and `LOGIN` thereafter.
+
+**`entra_login_sessions`** (migration 017) — one short-lived row per SSO attempt, holding what has to survive the browser's trip to Microsoft: `state` (unique), `nonce`, `code_verifier` (PKCE), `redirect_to`, then `exchange_code_hash` (unique, SHA-256 of the one-time handoff code), `user_id`, `authorized_at`, `consumed_at`, `expires_at`.
+
+It is a queue of in-flight sign-ins, not a session store — rows live ten minutes, are single-use, and are pruned whenever a sign-in starts. `code_verifier` is blanked the moment the row is claimed, and the handoff code is only ever stored hashed, so read access to this table yields nothing usable. See [18](18-entra-sso-plan.md).
 
 ### Location master data
 
@@ -126,8 +137,6 @@ Since migration 014 the action plan lives **per observation** in `closure_items`
 Note: the column default is still `'REQUESTED'`, which the CHECK constraint rejects. Inserts must always set `status` explicitly (the observation service does).
 
 
-**`departments`** (migration 016) — master data, plant-scoped, `UNIQUE (plant_id, code)`, loaded at cutover like the location hierarchy (R12). `users.department_id` puts an Action Team HOD in one department; `closure_items.department_id` and `action_tickets.department_id` record which department a plan and its ticket went to.
-
 **`closure_items`** (migration 014) — one per `observation_items` row, `UNIQUE (closure_request_id, sequence_number)` and `UNIQUE (observation_item_id)`, `ON DELETE CASCADE`.
 
 | Column | Notes |
@@ -135,9 +144,11 @@ Note: the column default is still `'REQUESTED'`, which the CHECK constraint reje
 | `closure_request_id` | FK `closure_requests` |
 | `observation_item_id` | FK `observation_items`; the observation this plan answers |
 | `sequence_number` | matches the observation's own sequence |
-| `action_plan`, `target_date`, `responsible_hod_name`, `action_hod_id`, `action_plan_saved_at` | this observation's plan and the department it is assigned to; all nullable until the auditee saves it |
+| `action_plan`, `target_date`, `action_plan_saved_at` | this observation's plan; all nullable until the auditee saves it |
 
-`action_tickets` also gains (migration 016) `department_id`, `submitted_for_approval_at`, `approved_by`/`approved_at`/`approval_comments`, and `reopen_comments`/`reopened_at`/`reopen_count`; its status CHECK now allows `PENDING_APPROVAL` (the EHS Officer's queue), whose state rule is `decision IS NOT NULL AND closure_date IS NULL`. `action_tickets.closure_item_id` (migration 014) points at the item, and the round uniqueness moved from `(closure_request_id, closure_round)` to `(closure_item_id, closure_round)`: one ticket per observation per round. Migration 015 recomputes every migrated closure's derived status once.
+**`closure_item_evidence`** (migration 018) — the photographs the auditee attaches to one observation's action plan as proof it was carried out: `closure_item_id` (FK, `ON DELETE CASCADE`), `file_path`, `original_name`, `mime_type`, `size`, `uploaded_by`, `uploaded_at`. **At most three per closure item, enforced in the service against a locked count, not by a constraint.** Optional throughout: an observation can be closed on its plan alone.
+
+Migration 018 removed the ticket system — `action_tickets`, `action_ticket_evidence`, `departments`, `users.department_id`, and the department/HOD columns on both closure tables — and restated every in-flight closure's status under the rule below. See [19](19-remove-tickets-plan.md).
 ## Status values
 
 Three parallel status columns describe one workflow. Which code path moves each one is documented in [05-workflows.md](05-workflows.md).

@@ -63,17 +63,30 @@ export const saveClosureItemValidationRules = [
       "Target date must use YYYY-MM-DD format.",
     ),
 
-  body("departmentId")
-    .notEmpty()
-    .withMessage(
-      "Select the department responsible for this plan.",
-    )
-    .bail()
+];
+
+export const closureItemValidationRules = [
+  ...closureIdValidationRules,
+
+  param("closureItemId")
     .isInt({
       min: 1,
     })
     .withMessage(
-      "Department must be a positive integer.",
+      "Closure item ID must be a positive integer.",
+    )
+    .toInt(),
+];
+
+export const closureEvidenceValidationRules = [
+  ...closureItemValidationRules,
+
+  param("evidenceId")
+    .isInt({
+      min: 1,
+    })
+    .withMessage(
+      "Evidence ID must be a positive integer.",
     )
     .toInt(),
 ];

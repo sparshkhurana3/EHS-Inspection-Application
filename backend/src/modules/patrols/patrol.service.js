@@ -4,6 +4,10 @@ import {
   withTransaction,
 } from "../../config/database.js";
 
+import {
+  buildInspectionReportWorkbook,
+} from "./inspectionReport.js";
+
 import * as patrolRepository
   from "./patrol.repository.js";
 
@@ -1053,5 +1057,199 @@ export async function uploadRoster({
 
     roster,
     summary,
+  };
+}
+
+/**
+ * The ISO week number for a "YYYY-MM-DD" Monday.
+ *
+ * ISO weeks belong to the year holding their Thursday, which is why the
+ * calculation hops to Thursday first: the Monday of the week that
+ * straddles New Year would otherwise be numbered against the wrong
+ * year. Kept here rather than imported from the dashboard because the
+ * two modules are deliberately self-contained; if a third needs it,
+ * that is the moment to extract it.
+ */
+function getIsoWeekNumber(dateOnly) {
+  const date = new Date(`${dateOnly}T00:00:00Z`);
+
+  const dayOfWeek =
+    (date.getUTCDay() + 6) % 7;
+
+  date.setUTCDate(
+    date.getUTCDate() - dayOfWeek + 3,
+  );
+
+  const firstThursday = new Date(
+    Date.UTC(date.getUTCFullYear(), 0, 4),
+  );
+
+  const firstDayOfWeek =
+    (firstThursday.getUTCDay() + 6) % 7;
+
+  firstThursday.setUTCDate(
+    firstThursday.getUTCDate() -
+      firstDayOfWeek +
+      3,
+  );
+
+  return (
+    1 +
+    Math.round(
+      (date - firstThursday) /
+        (7 * 24 * 60 * 60 * 1000),
+    )
+  );
+}
+
+/**
+ * The zone-by-week inspection report an EHS Officer downloads.
+ *
+ * Covers the current year up to today: "till date" is the point of the
+ * report, and including the weeks a roster has already scheduled into
+ * December would fill it with columns nobody could have acted on yet.
+ *
+ * Only weeks that actually had an inspection scheduled somewhere in the
+ * plant become columns. Generating every Monday regardless would pad
+ * the sheet with empty columns for the stretch before the roster was
+ * first uploaded.
+ */
+export async function getInspectionReport({
+  userId,
+  referenceDate = new Date(),
+}) {
+  const location =
+    await patrolRepository.findUserLocation(
+      userId,
+    );
+
+  if (!location) {
+    throw new AppError(
+      "No location is assigned to your account, so the inspection report cannot be produced. Contact the EHS application administrator.",
+      403,
+      "OFFICER_LOCATION_NOT_SET",
+    );
+  }
+
+  const cutoffDate = toDateOnlyString(
+    referenceDate,
+  );
+
+  const fromDate = `${cutoffDate.slice(0, 4)}-01-01`;
+
+  const [zones, weekStatuses] =
+    await Promise.all([
+      patrolRepository
+        .findZonesWithCurrentAssignment({
+          plantId: location.id,
+          cutoffDate,
+        }),
+
+      patrolRepository
+        .findZoneWeekInspectionStatus({
+          plantId: location.id,
+          fromDate,
+          cutoffDate,
+        }),
+    ]);
+
+  /*
+   * pg hands back a DATE as a JS Date, so every week key is normalised
+   * to "YYYY-MM-DD" before it is used to look anything up. Keying a map
+   * on a Date object would make every lookup miss.
+   */
+  const statusesByZone = new Map();
+  const weekStarts = new Set();
+
+  weekStatuses.forEach((status) => {
+    const weekStart = toDateOnlyString(
+      status.weekStart,
+    );
+
+    weekStarts.add(weekStart);
+
+    if (!statusesByZone.has(status.zoneId)) {
+      statusesByZone.set(
+        status.zoneId,
+        new Map(),
+      );
+    }
+
+    statusesByZone
+      .get(status.zoneId)
+      .set(weekStart, {
+        scheduledCount:
+          status.scheduledCount,
+        conductedCount:
+          status.conductedCount,
+      });
+  });
+
+  const weeks = [...weekStarts]
+    .sort()
+    .map((weekStart) => ({
+      weekStart,
+      isoWeek: getIsoWeekNumber(weekStart),
+    }));
+
+  /*
+   * A zone with nothing scheduled all year would be a row of grey, so
+   * it is left out: the report is about inspections that were due.
+   */
+  const rows = zones
+    .filter((zone) =>
+      statusesByZone.has(zone.zoneId),
+    )
+    .map((zone) => {
+      const cells = Object.fromEntries(
+        statusesByZone.get(zone.zoneId),
+      );
+
+      const totals = Object.values(
+        cells,
+      ).reduce(
+        (running, cell) => ({
+          scheduledTotal:
+            running.scheduledTotal +
+            cell.scheduledCount,
+
+          conductedTotal:
+            running.conductedTotal +
+            cell.conductedCount,
+        }),
+        {
+          scheduledTotal: 0,
+          conductedTotal: 0,
+        },
+      );
+
+      return {
+        ...zone,
+        ...totals,
+        cells,
+      };
+    });
+
+  const buffer =
+    await buildInspectionReportWorkbook({
+      plantName: location.name,
+      fromDate,
+      cutoffDate,
+      weeks,
+      rows,
+    });
+
+  return {
+    buffer,
+
+    fileName:
+      `inspection-report-${
+        location.code ?? location.name
+      }-${cutoffDate}.xlsx`
+        .toLowerCase()
+        .replace(/[^a-z0-9.-]+/g, "-"),
+
+    zoneCount: rows.length,
+    weekCount: weeks.length,
   };
 }

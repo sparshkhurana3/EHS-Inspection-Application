@@ -19,10 +19,12 @@ import {
 } from "../../shared/constants/roles.js";
 
 import {
+  addClosureItemEvidence,
   approveClosure,
-  getDepartmentOptions,
+  deleteClosureItemEvidence,
   getAuditeeClosures,
   getClosureById,
+  getClosureItemEvidence,
   getPendingApprovals,
   rejectClosure,
   saveClosureItem,
@@ -30,11 +32,18 @@ import {
 } from "./closure.controller.js";
 
 import {
+  closureEvidenceValidationRules,
   closureIdValidationRules,
+  closureItemValidationRules,
   closureReviewValidationRules,
   rejectClosureValidationRules,
   saveClosureItemValidationRules,
 } from "./closure.validator.js";
+
+import {
+  handleClosureUploadError,
+  uploadClosureEvidence,
+} from "./closureUpload.js";
 
 const router = Router();
 
@@ -69,19 +78,6 @@ router.get(
 );
 
 /*
- * The auditee's Action Team HOD dropdown for this closure. Registered
- * before the PATCH below only for readability; the methods differ so
- * there is no route-order ambiguity between them.
- */
-router.get(
-  "/:closureId/departments",
-  authenticate,
-  closureIdValidationRules,
-  validate,
-  getDepartmentOptions,
-);
-
-/*
  * One action plan per observation: the item id says which observation
  * on this closure's report the plan belongs to.
  */
@@ -91,6 +87,44 @@ router.patch(
   saveClosureItemValidationRules,
   validate,
   saveClosureItem,
+);
+
+/*
+ * Evidence that an observation's action plan was carried out: up to
+ * three photographs, attached by the auditee.
+ *
+ * The upload middleware runs before validation because multer is what
+ * parses a multipart body; the route parameters are checked straight
+ * afterwards, before anything touches the database.
+ */
+router.post(
+  "/:closureId/items/:closureItemId/evidence",
+  authenticate,
+  uploadClosureEvidence,
+  handleClosureUploadError,
+  closureItemValidationRules,
+  validate,
+  addClosureItemEvidence,
+);
+
+router.delete(
+  "/:closureId/items/:closureItemId/evidence/:evidenceId",
+  authenticate,
+  closureEvidenceValidationRules,
+  validate,
+  deleteClosureItemEvidence,
+);
+
+/*
+ * Served through an authenticated route rather than as a static file,
+ * so the closure's own read rules decide who sees the photograph.
+ */
+router.get(
+  "/:closureId/items/:closureItemId/evidence/:evidenceId",
+  authenticate,
+  closureEvidenceValidationRules,
+  validate,
+  getClosureItemEvidence,
 );
 
 /*

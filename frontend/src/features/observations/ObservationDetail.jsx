@@ -24,21 +24,15 @@ const CLOSURE_STATUS_LABELS = {
     "Sent back for re-examination",
 };
 
-const TICKET_STATUS_LABELS = {
-  OPEN: "Open",
-  IN_PROGRESS: "In progress",
-  CLOSED: "Closed",
-};
-
 /**
- * Once the auditee's closure and the Action HOD's ticket exist they are
- * shown here as information; the detail endpoint carries their status
- * and key dates, not the full records.
+ * Once the auditee's closure exists it is shown here as information;
+ * the detail endpoint carries its status and key dates, not the full
+ * record.
  */
 function ProgressBlock({ report }) {
-  const { closure, ticket } = report;
+  const { closure } = report;
 
-  if (!closure && !ticket) {
+  if (!closure) {
     return null;
   }
 
@@ -51,54 +45,23 @@ function ProgressBlock({ report }) {
       </p>
 
       <div className="closure-detail-grid">
-        {closure ? (
-          <>
-            <Field
-              label="Closure status"
-              value={
-                CLOSURE_STATUS_LABELS[
-                  closure.status
-                ] ?? closure.status
-              }
-            />
-            <Field
-              label="Action Team HOD"
-              value={closure.actionHodName}
-            />
-            <Field
-              label="Target date"
-              value={formatDate(closure.targetDate)}
-            />
-            {closure.approvedAt ? (
-              <Field
-                label="Approved"
-                value={formatDate(closure.approvedAt)}
-              />
-            ) : null}
-          </>
-        ) : null}
-
-        {ticket ? (
-          <>
-            <Field
-              label="Ticket status"
-              value={
-                TICKET_STATUS_LABELS[
-                  ticket.status
-                ] ?? ticket.status
-              }
-            />
-            <Field
-              label="Ticket decision"
-              value={ticket.decision}
-            />
-            {ticket.closureDate ? (
-              <Field
-                label="Ticket closed"
-                value={formatDate(ticket.closureDate)}
-              />
-            ) : null}
-          </>
+        <Field
+          label="Closure status"
+          value={
+            CLOSURE_STATUS_LABELS[
+              closure.status
+            ] ?? closure.status
+          }
+        />
+        <Field
+          label="Target date"
+          value={formatDate(closure.targetDate)}
+        />
+        {closure.approvedAt ? (
+          <Field
+            label="Approved"
+            value={formatDate(closure.approvedAt)}
+          />
         ) : null}
       </div>
 

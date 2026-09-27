@@ -36,14 +36,33 @@ Read once in `backend/src/config/environment.js` via `dotenv`; the object is fro
 | `JWT_SECRET` | **yes** | — | HS256 signing of access tokens |
 | `JWT_EXPIRES_IN` | no | `8h` | token lifetime (jsonwebtoken format) |
 | `PASSWORD_SALT_ROUNDS` | no | `12` | bcryptjs cost |
-| `FRONTEND_ORIGIN` | no | `http://localhost:5173` | CORS `origin` (single value, no credentials) |
+| `FRONTEND_ORIGIN` | no | `http://localhost:5173` | CORS `origin` (single value, no credentials); also the host the SSO redirects return to |
 
-Pool settings are hard-coded: `max: 10`, `idleTimeoutMillis: 30000`, `connectionTimeoutMillis: 5000`.
+### Microsoft Entra ID single sign-on
+
+All optional. Leave the first three unset and the app runs on passwords only and does not draw the SSO button; set *some* of the three and the process **fails at boot** rather than at the first sign-in. Administrator setup is [`guide.md`](../guide.md); the design is [18](18-entra-sso-plan.md).
+
+| Variable | Required | Default | Purpose |
+|---|---|---|---|
+| `ENTRA_TENANT_ID` | for SSO | — | Directory (tenant) ID; also pinned against the token's `tid` claim |
+| `ENTRA_CLIENT_ID` | for SSO | — | Application (client) ID; the ID token's expected audience |
+| `ENTRA_CLIENT_SECRET` | for SSO | — | **Secret.** Same class as `JWT_SECRET`: `.env` only, never committed |
+| `ENTRA_REDIRECT_URI` | no | `http://localhost:8090/api/auth/entra/callback` | Must match a registered redirect URI character for character |
+| `ENTRA_SCOPES` | no | `openid profile email` | No Graph permission is needed beyond `User.Read` |
+| `ENTRA_ROLE_CLAIM` | no | `roles` | `groups` to drive roles from group object IDs instead |
+| `ENTRA_ROLE_MAP` | no | empty | `DirectoryValue=APP_ROLE` pairs, comma separated. Unneeded when the Entra app roles are named after the app's role codes |
+| `ENTRA_DEFAULT_ROLE` | no | `USER` | Role for someone with no recognised app role. **Empty refuses the sign-in** |
+| `ENTRA_BUTTON_LABEL` | no | `Login with Entra SSO` | Button text |
+| `ENTRA_AUTHORITY` | no | `https://login.microsoftonline.com` | Sovereign clouds only (`.us`, `login.partner.microsoftonline.cn`) |
+
+Every optional Entra variable is read through `readOptional()`, because `compose.yaml` passes them as `${VAR:-}` and an unset one therefore arrives as an empty string, which `??` would accept.
+
+Pool settings are hard-coded: `max: 15`, `idleTimeoutMillis: 30000`, `connectionTimeoutMillis: 5000`.
 
 Other hard-coded runtime facts:
 - Uploads go to `path.resolve(process.cwd(), "uploads", "observations")`. The directory is **not** created automatically (multer `diskStorage` with a destination *function* does not mkdir). Start the process from `backend/` and make sure the folder exists.
 - `app.set("trust proxy", 1)` is already on, so `express-rate-limit` and `req.ip` work behind one reverse proxy.
-- Auth rate limit: 20 requests / 15 min per IP on `/api/auth/*`.
+- Auth rate limit: 20 requests / 15 min per IP on the password and signup routes. The SSO routes have their own, far looser limit (600 / 15 min) because a whole site shares one egress IP and they accept no guessable secret.
 - JSON body limit 1 MB; multipart photo limit 10 MB.
 
 ## Frontend environment variables
@@ -52,9 +71,9 @@ Vite only exposes variables prefixed `VITE_`, and they are baked in **at build t
 
 | Variable | Read in | Default |
 |---|---|---|
-| `VITE_API_BASE_URL` | `src/services/apiClient.js` | `http://localhost:3000/api` |
+| `VITE_API_BASE_URL` | `src/services/apiClient.js` | `/api` |
 
-`frontend/.env` currently defines `VITE_API_URL`, which nothing reads. Rename it to `VITE_API_BASE_URL` (tracked in the backlog).
+`frontend/.env` sets it to `http://localhost:3000/api` for `npm run dev`. The container build passes `/api` as a build arg, which takes precedence, so in Docker the browser is same-origin through nginx.
 
 ## Files that are committed but should not be
 

@@ -949,3 +949,169 @@ export async function updateRosterAssignmentForZone(
 
   return result.rows[0] ?? null;
 }
+
+/**
+ * Every auditable zone at a plant, with the auditor and auditee
+ * currently answerable for it.
+ *
+ * "Currently" is the assignment on the zone's most recent inspection on
+ * or before today, because that is who last audited it. A zone that has
+ * not been audited yet falls back to the next one scheduled, so a new
+ * zone still shows who is lined up rather than an empty pair. The
+ * ordering does both at once: patrols in the past sort first, and
+ * within each side the one nearest today wins.
+ */
+export async function findZonesWithCurrentAssignment(
+  {
+    plantId,
+    cutoffDate,
+  },
+  client = databasePool,
+) {
+  const result = await client.query(
+    `
+      SELECT
+        zone_record.id AS zone_id,
+        zone_record.name AS zone_name,
+        zone_record.zone_number,
+
+        unit_record.name AS unit_name,
+        unit_record.unit_number,
+
+        plant_record.name AS plant_name,
+
+        current_assignment.auditor_name,
+        current_assignment.auditee_name,
+        current_assignment.scheduled_date
+          AS assignment_date
+
+      FROM zones AS zone_record
+
+      JOIN units AS unit_record
+        ON unit_record.id = zone_record.unit_id
+
+      JOIN plants AS plant_record
+        ON plant_record.id = unit_record.plant_id
+
+      LEFT JOIN LATERAL (
+        SELECT
+          auditor.full_name AS auditor_name,
+          auditee.full_name AS auditee_name,
+          patrol.scheduled_date
+
+        FROM patrols AS patrol
+
+        JOIN users AS auditor
+          ON auditor.id = patrol.auditor_id
+
+        JOIN users AS auditee
+          ON auditee.id = patrol.auditee_id
+
+        WHERE
+          patrol.zone_id = zone_record.id
+          AND patrol.status <> 'CANCELLED'
+
+        ORDER BY
+          (patrol.scheduled_date <= $2::DATE) DESC,
+          ABS(patrol.scheduled_date - $2::DATE) ASC,
+          patrol.id DESC
+
+        LIMIT 1
+      ) AS current_assignment ON TRUE
+
+      WHERE
+        unit_record.plant_id = $1
+        AND zone_record.is_active
+        AND unit_record.is_active
+
+      ORDER BY
+        unit_record.unit_number NULLS LAST,
+        unit_record.name,
+        zone_record.zone_number NULLS LAST,
+        zone_record.name
+    `,
+    [plantId, cutoffDate],
+  );
+
+  return result.rows.map((row) => ({
+    zoneId: Number(row.zone_id),
+    zoneName: row.zone_name,
+    zoneNumber: row.zone_number,
+    unitName: row.unit_name,
+    unitNumber: row.unit_number,
+    plantName: row.plant_name,
+    auditorName: row.auditor_name ?? null,
+    auditeeName: row.auditee_name ?? null,
+    assignmentDate:
+      row.assignment_date ?? null,
+  }));
+}
+
+/**
+ * One row per zone per week that had an inspection scheduled, with how
+ * many were scheduled and how many actually happened.
+ *
+ * Conducted means an observation report was filed, which is the same
+ * test the dashboard metrics use: "no observation to record" is still a
+ * completed inspection.
+ *
+ * Grouped by DATE_TRUNC('week'), which in PostgreSQL starts on Monday —
+ * the day the roster schedules everything on — so each group is one
+ * inspection week even if an extra audit was planned by hand midweek.
+ */
+export async function findZoneWeekInspectionStatus(
+  {
+    plantId,
+    fromDate,
+    cutoffDate,
+  },
+  client = databasePool,
+) {
+  const result = await client.query(
+    `
+      SELECT
+        patrol.zone_id,
+
+        DATE_TRUNC(
+          'week',
+          patrol.scheduled_date
+        )::DATE AS week_start,
+
+        COUNT(*)::INTEGER AS scheduled_count,
+
+        COUNT(report.id)::INTEGER
+          AS conducted_count
+
+      FROM patrols AS patrol
+
+      JOIN units AS unit_record
+        ON unit_record.id = patrol.unit_id
+
+      LEFT JOIN observation_reports AS report
+        ON report.patrol_id = patrol.id
+
+      WHERE
+        unit_record.plant_id = $1
+        AND patrol.scheduled_date >= $2::DATE
+        AND patrol.scheduled_date <= $3::DATE
+        /* A cancelled audit was never owed, so it is not a miss. */
+        AND patrol.status <> 'CANCELLED'
+
+      GROUP BY
+        patrol.zone_id,
+        week_start
+
+      ORDER BY
+        week_start,
+        patrol.zone_id
+    `,
+    [plantId, fromDate, cutoffDate],
+  );
+
+  return result.rows.map((row) => ({
+    zoneId: Number(row.zone_id),
+    weekStart: row.week_start,
+    scheduledCount: row.scheduled_count,
+    conductedCount: row.conducted_count,
+  }));
+}

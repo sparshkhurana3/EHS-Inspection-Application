@@ -16,8 +16,6 @@ import closureRoutes
   from "./modules/closures/closure.routes.js";
 import patrolRoutes
   from "./modules/patrols/patrol.routes.js";
-import ticketRoutes
-  from "./modules/tickets/ticket.routes.js";
 
 import {
   errorHandler,
@@ -104,11 +102,6 @@ app.use(
 app.use(
   "/api/patrols",
   patrolRoutes,
-);
-
-app.use(
-  "/api/tickets",
-  ticketRoutes,
 );
 
 app.use(notFoundHandler);

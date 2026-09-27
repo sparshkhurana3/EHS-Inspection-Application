@@ -7,7 +7,7 @@ import { useObservationHistory } from "./useObservations.js";
 
 export const HISTORY_FILTERS = [
   { value: "all", label: "All" },
-  { value: "closed", label: "Closed via ticket" },
+  { value: "closed", label: "Closed" },
   {
     value: "no_observations",
     label: "No observations",
@@ -18,7 +18,7 @@ export const HISTORY_FILTERS = [
 const EMPTY_MESSAGES = {
   all: "No observation reports in the last six months.",
   closed:
-    "No report has been closed through a ticket in the last six months.",
+    "No report has been closed in the last six months.",
   no_observations:
     "No audit was closed with no observation in the last six months.",
   in_progress:

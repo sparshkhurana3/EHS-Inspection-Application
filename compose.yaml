@@ -38,6 +38,16 @@ services:
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-8h}
       PASSWORD_SALT_ROUNDS: ${PASSWORD_SALT_ROUNDS:-12}
       FRONTEND_ORIGIN: http://localhost:${APP_PORT:-8090}
+      # Microsoft Entra ID single sign-on. Blank disables it and the
+      # app falls back to username and password only, so the stack
+      # still comes up on a machine that has no tenant configured.
+      ENTRA_TENANT_ID: ${ENTRA_TENANT_ID:-}
+      ENTRA_CLIENT_ID: ${ENTRA_CLIENT_ID:-}
+      ENTRA_CLIENT_SECRET: ${ENTRA_CLIENT_SECRET:-}
+      ENTRA_REDIRECT_URI: ${ENTRA_REDIRECT_URI:-}
+      ENTRA_ROLE_MAP: ${ENTRA_ROLE_MAP:-}
+      ENTRA_AUTHORITY: ${ENTRA_AUTHORITY:-}
+      ENTRA_DEFAULT_ROLE: ${ENTRA_DEFAULT_ROLE:-USER}
     volumes:
       - ehs_uploads:/app/uploads
     depends_on:

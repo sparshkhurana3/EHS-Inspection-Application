@@ -452,11 +452,27 @@ export async function findManagementCurrentWeekPatrols(
   return result.rows.map(mapAudit);
 }
 
+/**
+ * What this user has been asked to do this year, and how much of it is
+ * done, split by the side of the patrol they were on.
+ *
+ * Bounded by `cutoffDate` (today) rather than running to the end of the
+ * year, because a roster schedules every Monday to 31 December: counting
+ * the whole year would tell somebody in January that they had done 2 of
+ * 52 inspections. "Assigned so far" is the number that says whether they
+ * are keeping up.
+ *
+ * The two sides are counted separately on purpose. One person is often
+ * auditor on some zones and auditee on others, and the work differs:
+ * an auditor conducts the inspection and files the report, an auditee
+ * answers it with a closure. Merging them would report an auditee as
+ * having "conducted" inspections somebody else carried out.
+ */
 export async function getUserAnnualMetrics(
   {
     userId,
     yearStart,
-    yearEnd,
+    cutoffDate,
   },
   client = databasePool,
 ) {
@@ -464,99 +480,190 @@ export async function getUserAnnualMetrics(
     `
       WITH assigned_patrols AS (
         SELECT
-          p.id,
-          p.auditor_id,
-          p.auditee_id
-        FROM patrols p
+          patrol.id,
+          patrol.auditor_id,
+          patrol.auditee_id
+        FROM patrols AS patrol
         WHERE
           (
-            p.auditor_id = $1
-            OR p.auditee_id = $1
+            patrol.auditor_id = $1
+            OR patrol.auditee_id = $1
           )
-          AND p.scheduled_date >= $2::DATE
-          AND p.scheduled_date < $3::DATE
-          AND p.status <> 'CANCELLED'
-      ),
-
-      audit_metrics AS (
-        SELECT
-          COUNT(*) FILTER (
-            WHERE assigned_patrols.auditor_id = $1
-          )::INTEGER AS total_audits,
-
-          COUNT(*) FILTER (
-            WHERE
-              assigned_patrols.auditor_id = $1
-              AND EXISTS (
-                SELECT 1
-                FROM observation_reports
-                    observation_report
-                WHERE
-                    observation_report.patrol_id =
-                        assigned_patrols.id
-                    AND observation_report.submitted_by = $1
-              )
-          )::INTEGER AS conducted_audits
-
-        FROM assigned_patrols
-      ),
-
-      closure_metrics AS (
-        SELECT
-          COUNT(*)::INTEGER
-              AS closures_requested,
-
-          COUNT(*) FILTER (
-            WHERE
-              closure_request.status = 'APPROVED'
-              AND closure_request.closed_at IS NOT NULL
-          )::INTEGER
-              AS actual_closures
-
-        FROM closure_requests closure_request
-
-        JOIN assigned_patrols
-          ON assigned_patrols.id =
-             closure_request.patrol_id
-
-        WHERE
-          closure_request.requested_by = $1
-          AND closure_request.requested_at >=
-              $2::DATE
-          AND closure_request.requested_at <
-              $3::DATE
+          AND patrol.scheduled_date >= $2::DATE
+          AND patrol.scheduled_date <= $3::DATE
+          AND patrol.status <> 'CANCELLED'
       )
 
       SELECT
-        audit_metrics.total_audits,
-        audit_metrics.conducted_audits,
-        closure_metrics.closures_requested,
-        closure_metrics.actual_closures
+        COUNT(*) FILTER (
+          WHERE assigned_patrols.auditor_id = $1
+        )::INTEGER AS auditor_assigned,
 
-      FROM audit_metrics
-      CROSS JOIN closure_metrics
+        /*
+         * Conducted means the auditor filed something: an observation
+         * report, or "no observation to record", which is equally a
+         * completed inspection.
+         */
+        COUNT(*) FILTER (
+          WHERE
+            assigned_patrols.auditor_id = $1
+            AND EXISTS (
+              SELECT 1
+              FROM observation_reports AS report
+              WHERE report.patrol_id = assigned_patrols.id
+            )
+        )::INTEGER AS auditor_conducted,
+
+        COUNT(*) FILTER (
+          WHERE assigned_patrols.auditee_id = $1
+        )::INTEGER AS auditee_assigned,
+
+        /*
+         * An auditee only has work once the auditor files a report that
+         * has findings on it, so their denominator is the closures
+         * actually raised for them, not every patrol they are named on.
+         */
+        COUNT(*) FILTER (
+          WHERE
+            assigned_patrols.auditee_id = $1
+            AND EXISTS (
+              SELECT 1
+              FROM closure_requests AS closure
+              WHERE closure.patrol_id = assigned_patrols.id
+            )
+        )::INTEGER AS closures_raised,
+
+        COUNT(*) FILTER (
+          WHERE
+            assigned_patrols.auditee_id = $1
+            AND EXISTS (
+              SELECT 1
+              FROM closure_requests AS closure
+              WHERE closure.patrol_id = assigned_patrols.id
+                AND closure.status = 'APPROVED'
+            )
+        )::INTEGER AS closures_approved
+
+      FROM assigned_patrols
     `,
     [
       userId,
       yearStart,
-      yearEnd,
+      cutoffDate,
     ],
   );
 
+  const row = result.rows[0] ?? {};
+
   return {
-    totalAudits:
-      result.rows[0]?.total_audits ?? 0,
+    auditorAssigned: row.auditor_assigned ?? 0,
+    auditorConducted: row.auditor_conducted ?? 0,
+    auditeeAssigned: row.auditee_assigned ?? 0,
+    closuresRaised: row.closures_raised ?? 0,
+    closuresApproved: row.closures_approved ?? 0,
+  };
+}
 
-    conductedAudits:
-      result.rows[0]?.conducted_audits ?? 0,
+/**
+ * The plant-wide picture for an EHS Officer: how much of the year's
+ * planned inspection programme has actually happened, and what it
+ * produced.
+ *
+ * `plantId` null means every plant, which is what a Plant Head or Admin
+ * with no plant set sees.
+ */
+export async function getManagementAnnualMetrics(
+  {
+    plantId,
+    yearStart,
+    cutoffDate,
+  },
+  client = databasePool,
+) {
+  const result = await client.query(
+    `
+      WITH due_patrols AS (
+        SELECT patrol.id
+        FROM patrols AS patrol
+        JOIN units AS unit_record
+          ON unit_record.id = patrol.unit_id
+        WHERE
+          patrol.scheduled_date >= $2::DATE
+          AND patrol.scheduled_date <= $3::DATE
+          /*
+           * A cancelled patrol was never owed, so it belongs in
+           * neither side of the due-versus-conducted comparison.
+           */
+          AND patrol.status <> 'CANCELLED'
+          AND (
+            $1::BIGINT IS NULL
+            OR unit_record.plant_id = $1::BIGINT
+          )
+      ),
 
-    closuresRequested:
-      result.rows[0]
-        ?.closures_requested ?? 0,
+      /*
+       * One report per patrol is enforced by a unique constraint, so
+       * this is also the count of inspections conducted.
+       */
+      due_reports AS (
+        SELECT report.*
+        FROM observation_reports AS report
+        JOIN due_patrols
+          ON due_patrols.id = report.patrol_id
+      ),
 
-    actualClosures:
-      result.rows[0]
-        ?.actual_closures ?? 0,
+      due_closures AS (
+        SELECT closure.*
+        FROM closure_requests AS closure
+        JOIN due_patrols
+          ON due_patrols.id = closure.patrol_id
+      )
+
+      SELECT
+        (SELECT COUNT(*) FROM due_patrols)::INTEGER
+          AS inspections_due,
+
+        (SELECT COUNT(*) FROM due_reports)::INTEGER
+          AS inspections_conducted,
+
+        (
+          SELECT COUNT(*) FROM due_reports
+          WHERE no_observations = FALSE
+        )::INTEGER AS reports_with_findings,
+
+        (
+          SELECT COUNT(*) FROM due_reports
+          WHERE no_observations = TRUE
+        )::INTEGER AS reports_without_findings,
+
+        (SELECT COUNT(*) FROM due_closures)::INTEGER
+          AS closures_raised,
+
+        (
+          SELECT COUNT(*) FROM due_closures
+          WHERE status = 'APPROVED'
+        )::INTEGER AS closures_approved
+    `,
+    [
+      plantId ?? null,
+      yearStart,
+      cutoffDate,
+    ],
+  );
+
+  const row = result.rows[0] ?? {};
+
+  return {
+    inspectionsDue: row.inspections_due ?? 0,
+    inspectionsConducted:
+      row.inspections_conducted ?? 0,
+    reportsWithFindings:
+      row.reports_with_findings ?? 0,
+    reportsWithoutFindings:
+      row.reports_without_findings ?? 0,
+    closuresRaised: row.closures_raised ?? 0,
+    closuresApproved:
+      row.closures_approved ?? 0,
   };
 }
 

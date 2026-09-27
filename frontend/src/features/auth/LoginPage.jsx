@@ -1,12 +1,18 @@
-import { useState } from "react";
+import {
+  useEffect,
+  useState,
+} from "react";
 import {
   Link,
   useNavigate,
+  useSearchParams,
 } from "react-router-dom";
 
 import AuthLayout from "../../layouts/AuthLayout.jsx";
 import Button from "../../components/Button.jsx";
+import EntraSignInButton from "./EntraSignInButton.jsx";
 import useAuth from "./useAuth.js";
+import { fetchAuthProviders } from "./auth.service.js";
 
 const initialValues = {
   identifier: "",
@@ -15,6 +21,8 @@ const initialValues = {
 
 export default function LoginPage() {
   const navigate = useNavigate();
+
+  const [searchParams] = useSearchParams();
 
   const {
     loading,
@@ -25,6 +33,50 @@ export default function LoginPage() {
 
   const [formValues, setFormValues] =
     useState(initialValues);
+
+  /*
+   * Single sign-on fails on a round trip through Microsoft rather than
+   * inside a fetch, so the reason arrives as a query parameter on the
+   * redirect back to this page.
+   */
+  const [ssoError, setSsoError] = useState(
+    () => searchParams.get("ssoError") ?? "",
+  );
+
+  /*
+   * Whether this deployment has Entra configured at all. Until the
+   * answer arrives the button is not drawn, so it never flashes up on a
+   * deployment that runs on passwords only.
+   */
+  const [entraProvider, setEntraProvider] =
+    useState(null);
+
+  useEffect(() => {
+    let isCurrent = true;
+
+    fetchAuthProviders()
+      .then((result) => {
+        if (isCurrent) {
+          setEntraProvider(
+            result?.providers?.entra ?? null,
+          );
+        }
+      })
+      .catch(() => {
+        /*
+         * The password form is the failsafe and must stay usable even
+         * when this lookup fails, so a failure here is silent: it only
+         * means the single sign-on button is not offered.
+         */
+        if (isCurrent) {
+          setEntraProvider(null);
+        }
+      });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, []);
 
   function handleChange(event) {
   const fieldName = event.target.name;
@@ -48,6 +100,7 @@ export default function LoginPage() {
     return currentValues;
   });
 
+  setSsoError("");
   clearMessages();
   }
 
@@ -70,6 +123,8 @@ export default function LoginPage() {
       },
     );
   }
+
+  const displayedError = error || ssoError;
 
   return (
     <AuthLayout
@@ -116,12 +171,12 @@ export default function LoginPage() {
           />
         </div>
 
-        {error && (
+        {displayedError && (
           <div
             className="auth-form-error"
             role="alert"
           >
-            {error}
+            {displayedError}
           </div>
         )}
 
@@ -136,6 +191,13 @@ export default function LoginPage() {
             : "Sign in"}
         </Button>
       </form>
+
+      {entraProvider?.enabled && (
+        <EntraSignInButton
+          label={entraProvider.label}
+          disabled={loading}
+        />
+      )}
 
       <p className="auth-switch-message">
         Do not have an account?{" "}

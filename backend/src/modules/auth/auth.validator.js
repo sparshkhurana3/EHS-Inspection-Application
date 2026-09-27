@@ -105,3 +105,19 @@ export const loginValidationRules = [
     })
     .withMessage("Password is too long."),
 ];
+
+export const entraExchangeValidationRules = [
+  body("code")
+    .isString()
+    .trim()
+    .notEmpty()
+    .withMessage(
+      "The sign-in code is required.",
+    )
+    .isLength({
+      max: 128,
+    })
+    .withMessage(
+      "The sign-in code is not valid.",
+    ),
+];

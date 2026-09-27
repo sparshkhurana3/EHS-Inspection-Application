@@ -17,8 +17,6 @@ export default function ActionPlanForm({
   submitError,
   onItemSaved,
   onSendForApproval,
-  departmentOptions,
-  departmentOptionsLoading,
   plantName,
 }) {
   const items = closure?.items ?? [];
@@ -27,8 +25,11 @@ export default function ActionPlanForm({
     closure?.canSubmitForClosure,
   );
 
-  const closedTickets =
-    closure?.closedTicketCount ?? 0;
+  const plannedItems =
+    closure?.plannedItemCount ?? 0;
+
+  const evidenceCount =
+    closure?.evidenceCount ?? 0;
 
   const itemCount =
     closure?.itemCount ?? items.length;
@@ -47,8 +48,12 @@ export default function ActionPlanForm({
             {itemCount === 1
               ? "1 observation"
               : `${itemCount} observations`}{" "}
-            · {closedTickets}/{itemCount} tickets
-            resolved
+            · {plannedItems}/{itemCount} planned
+            {evidenceCount > 0
+              ? ` · ${evidenceCount} photograph${
+                  evidenceCount === 1 ? "" : "s"
+                }`
+              : ""}
             {closure?.approvalIteration > 1
               ? ` · attempt ${closure.approvalIteration}`
               : ""}
@@ -99,13 +104,6 @@ export default function ActionPlanForm({
                 ? photograph
                 : "")
             }
-            departmentOptions={
-              departmentOptions
-            }
-            departmentOptionsLoading={
-              departmentOptionsLoading
-            }
-            plantName={plantName}
             onSaved={onItemSaved}
           />
         ))
@@ -130,7 +128,7 @@ export default function ActionPlanForm({
           title={
             canSubmit
               ? undefined
-              : "Every observation needs an accepted-or-rejected ticket before this closure can be submitted."
+              : "Every observation needs a saved action plan before this closure can be submitted."
           }
           onClick={onSendForApproval}
         >
@@ -146,10 +144,9 @@ export default function ActionPlanForm({
         ) : !canSubmit ? (
           <p className="closure-empty-note">
             Every observation needs a saved action
-            plan, and every department needs to
-            have accepted or rejected its ticket,
-            before this closure can be sent for
-            approval.
+            plan before this closure can be sent
+            for approval. Evidence photographs are
+            optional.
           </p>
         ) : null}
       </div>

@@ -13,12 +13,10 @@ import {
 
 import ActionPlanForm from "./ActionPlanForm.jsx";
 import ApprovalQueuePage from "./ApprovalQueuePage.jsx";
-import TicketApprovalQueuePage from "./TicketApprovalQueuePage.jsx";
 import ClosureList from "./ClosureList.jsx";
 import ObservationSummary from "./ObservationSummary.jsx";
 
 import {
-  useDepartmentOptions,
   useAuditeeClosures,
   useClosureDetail,
   useClosureSubmission,
@@ -44,9 +42,6 @@ function ClosureDetailPanel({
     closureId,
     onSubmitted: reload,
   });
-
-  const departmentOptions =
-    useDepartmentOptions(closureId);
 
   if (loading) {
     return (
@@ -113,15 +108,6 @@ function ClosureDetailPanel({
         onSendForApproval={
           submission.sendForApproval
         }
-        departmentOptions={
-          departmentOptions.options
-        }
-        departmentOptionsLoading={
-          departmentOptions.loading
-        }
-        plantName={
-          departmentOptions.plantName
-        }
       />
     </section>
   );
@@ -152,48 +138,11 @@ export default function ClosurePage() {
 
   const view = searchParams.get("view");
   const showApprovals = view === "approvals";
-  const showTicketApprovals =
-    view === "ticket-approvals";
 
   const isOfficer = canPlanAudits(user);
 
   if (isOfficer && showApprovals) {
     return <ApprovalQueuePage />;
-  }
-
-  /*
-   * The EHS Officer reviews tickets here rather than on the Ticket
-   * page, which stays Action Team HOD only (docs/17, D7).
-   */
-  if (isOfficer && showTicketApprovals) {
-    return (
-      <section className="closure-page">
-        <header className="observation-section-header">
-          <div>
-            <span className="dashboard-eyebrow">
-              EHS Officer workflow
-            </span>
-
-            <h1>Ticket approvals</h1>
-
-            <p>
-              Tickets the Action Team HODs have
-              sent for your decision.
-            </p>
-          </div>
-
-          <button
-            type="button"
-            className="button button-secondary"
-            onClick={() => setSearchParams({})}
-          >
-            Back to closures
-          </button>
-        </header>
-
-        <TicketApprovalQueuePage />
-      </section>
-    );
   }
 
   if (closureId) {
@@ -247,18 +196,6 @@ export default function ClosurePage() {
                 }
               >
                 Closure approvals
-              </button>
-
-              <button
-                type="button"
-                className="button button-secondary"
-                onClick={() =>
-                  setSearchParams({
-                    view: "ticket-approvals",
-                  })
-                }
-              >
-                Ticket approvals
               </button>
             </>
           ) : null}

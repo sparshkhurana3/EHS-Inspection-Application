@@ -42,7 +42,7 @@ async function startServer() {
       path.resolve(
         process.cwd(),
         "uploads",
-        "tickets",
+        "closures",
       ),
       { recursive: true },
     );

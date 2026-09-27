@@ -89,12 +89,22 @@ function getMonthRange(year, month) {
 
 function getYearRange(year) {
   return {
-    yearStart:
-      `${year}-01-01`,
-
-    yearEnd:
-      `${year + 1}-01-01`,
+    yearStart: `${year}-01-01`,
   };
+}
+
+/*
+ * The "till date" edge of the year-to-date metrics: today, or the last
+ * day of the year once that year is behind us, so looking back at a
+ * finished year reports the whole of it rather than nothing.
+ */
+function getMetricsCutoff(year, referenceDate) {
+  const endOfYear = `${year}-12-31`;
+  const today = formatDateOnly(referenceDate);
+
+  return today < endOfYear
+    ? today
+    : endOfYear;
 }
 
 function getCurrentWeekRange(referenceDate) {
@@ -256,7 +266,7 @@ function createManagementWeek(
 
 /*
  * The single label an EHS Officer sees on a zone card, collapsing the
- * observation report and closure/ticket machinery into the five states
+ * observation report and closure machinery into the five states
  * they were asked for. Driven by closureStatus rather than
  * patrol.status: PATROL.status only ever reaches SCHEDULED,
  * PENDING_AUDITEE_ACTION, REEXAMINATION_REQUIRED or COMPLETED in
@@ -465,10 +475,8 @@ export async function getDashboardData({
   const currentYear =
     referenceDate.getUTCFullYear();
 
-  const {
-    yearStart,
-    yearEnd,
-  } = getYearRange(currentYear);
+  const { yearStart } =
+    getYearRange(currentYear);
 
   const {
     weekStart,
@@ -477,10 +485,26 @@ export async function getDashboardData({
     referenceDate,
   );
 
+  const metricsCutoff = getMetricsCutoff(
+    currentYear,
+    referenceDate,
+  );
+
   if (isManagementRole(dashboardRole)) {
+    /*
+     * Metrics are scoped to the manager's own plant, the same as the
+     * officer's week card below, because every location has its own
+     * officer and a plant-wide number is what they are answerable for.
+     * A manager with no plant set sees every plant.
+     */
+    const managementPlant =
+      await dashboardRepository
+        .findOfficerPlant(user.id);
+
     const [
       monthlyAudits,
       currentWeekAudits,
+      annualMetrics,
     ] = await Promise.all([
       dashboardRepository
         .findManagementMonthlyPatrols({
@@ -493,6 +517,13 @@ export async function getDashboardData({
           weekStart,
           weekEnd,
         }),
+
+      dashboardRepository
+        .getManagementAnnualMetrics({
+          plantId: managementPlant?.id ?? null,
+          yearStart,
+          cutoffDate: metricsCutoff,
+        }),
     ]);
 
     /*
@@ -503,22 +534,20 @@ export async function getDashboardData({
      */
     let officerWeek = null;
 
-    if (dashboardRole === USER_ROLES.EHS_OFFICER) {
-      const officerPlant =
+    if (
+      dashboardRole ===
+        USER_ROLES.EHS_OFFICER &&
+      managementPlant
+    ) {
+      const weekRows =
         await dashboardRepository
-          .findOfficerPlant(user.id);
+          .findOfficerWeekPatrols({
+            plantId: managementPlant.id,
+            weekStart,
+          });
 
-      if (officerPlant) {
-        const weekRows =
-          await dashboardRepository
-            .findOfficerWeekPatrols({
-              plantId: officerPlant.id,
-              weekStart,
-            });
-
-        officerWeek =
-          buildOfficerWeek(weekRows);
-      }
+      officerWeek =
+        buildOfficerWeek(weekRows);
     }
 
     return {
@@ -530,8 +559,38 @@ export async function getDashboardData({
       },
 
       metricsPeriod: {
+        year: currentYear,
         startDate: yearStart,
-        endDate: `${currentYear}-12-31`,
+        endDate: metricsCutoff,
+        scopeName:
+          managementPlant?.name ?? null,
+      },
+
+      metrics: {
+        scope: "PLANT",
+
+        inspections: {
+          conducted:
+            annualMetrics.inspectionsConducted,
+          due: annualMetrics.inspectionsDue,
+        },
+
+        observationReports: {
+          total:
+            annualMetrics.reportsWithFindings +
+            annualMetrics.reportsWithoutFindings,
+          withFindings:
+            annualMetrics.reportsWithFindings,
+          withoutFindings:
+            annualMetrics.reportsWithoutFindings,
+        },
+
+        closureReports: {
+          raised:
+            annualMetrics.closuresRaised,
+          approved:
+            annualMetrics.closuresApproved,
+        },
       },
 
       audits: monthlyAudits,
@@ -570,7 +629,7 @@ export async function getDashboardData({
       .getUserAnnualMetrics({
         userId: user.id,
         yearStart,
-        yearEnd,
+        cutoffDate: metricsCutoff,
       }),
   ]);
 
@@ -588,8 +647,10 @@ export async function getDashboardData({
     },
 
     metricsPeriod: {
+      year: currentYear,
       startDate: yearStart,
-      endDate: `${currentYear}-12-31`,
+      endDate: metricsCutoff,
+      scopeName: null,
     },
 
     audits: monthlyAudits,
@@ -597,20 +658,22 @@ export async function getDashboardData({
     nextWeek: null,
 
     metrics: {
-      audits: {
-        conducted:
-          annualMetrics.conductedAudits,
+      scope: "SELF",
 
-        total:
-          annualMetrics.totalAudits,
+      /* What they were asked to audit, and what they filed. */
+      inspections: {
+        conducted:
+          annualMetrics.auditorConducted,
+        due: annualMetrics.auditorAssigned,
       },
 
+      /* The other side of the patrol: answering somebody else's report. */
       closures: {
-        requested:
-          annualMetrics.closuresRequested,
-
-        actual:
-          annualMetrics.actualClosures,
+        approved:
+          annualMetrics.closuresApproved,
+        raised: annualMetrics.closuresRaised,
+        assigned:
+          annualMetrics.auditeeAssigned,
       },
     },
   };

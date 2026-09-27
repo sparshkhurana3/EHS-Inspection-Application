@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import * as closureService
   from "./closure.service.js";
 
@@ -125,27 +127,6 @@ export async function saveClosureItem(
   }
 }
 
-export async function getDepartmentOptions(
-  req,
-  res,
-  next,
-) {
-  try {
-    const result =
-      await closureService
-        .getDepartmentOptions({
-          userId: req.user.id,
-
-          closureId:
-            req.params.closureId,
-        });
-
-    res.status(200).json(result);
-  } catch (error) {
-    next(error);
-  }
-}
-
 export async function submitClosure(
   req,
   res,
@@ -162,6 +143,99 @@ export async function submitClosure(
         });
 
     res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+export async function addClosureItemEvidence(
+  req,
+  res,
+  next,
+) {
+  try {
+    const result =
+      await closureService
+        .addClosureItemEvidence({
+          userId: req.user.id,
+
+          closureId:
+            req.params.closureId,
+
+          closureItemId:
+            req.params.closureItemId,
+
+          files: req.files,
+        });
+
+    res.status(201).json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function deleteClosureItemEvidence(
+  req,
+  res,
+  next,
+) {
+  try {
+    const result =
+      await closureService
+        .deleteClosureItemEvidence({
+          userId: req.user.id,
+
+          closureId:
+            req.params.closureId,
+
+          closureItemId:
+            req.params.closureItemId,
+
+          evidenceId:
+            req.params.evidenceId,
+        });
+
+    res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getClosureItemEvidence(
+  req,
+  res,
+  next,
+) {
+  try {
+    const evidence =
+      await closureService
+        .getClosureItemEvidenceFile({
+          userId: req.user.id,
+
+          closureId:
+            req.params.closureId,
+
+          closureItemId:
+            req.params.closureItemId,
+
+          evidenceId:
+            req.params.evidenceId,
+        });
+
+    res.type(evidence.mimeType);
+
+    res.setHeader(
+      "Content-Disposition",
+      `inline; filename="${path.basename(
+        evidence.originalName,
+      )}"`,
+    );
+
+    res.setHeader(
+      "Cache-Control",
+      "private, max-age=300",
+    );
+
+    res.sendFile(evidence.absolutePath);
   } catch (error) {
     next(error);
   }

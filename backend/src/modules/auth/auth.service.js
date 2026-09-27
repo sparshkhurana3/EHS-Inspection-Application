@@ -1,5 +1,4 @@
 import bcrypt from "bcryptjs";
-import jwt from "jsonwebtoken";
 
 import {
   environment,
@@ -11,10 +10,15 @@ import {
 
 import {
   DEFAULT_SIGNUP_ROLE,
-  USER_ROLES,
 } from "../../shared/constants/roles.js";
 
 import AppError from "../../shared/errors/AppError.js";
+
+import {
+  createAccessToken,
+  createPublicUser,
+  determineRedirectPath,
+} from "./authSession.js";
 
 import * as authRepository from "./auth.repository.js";
 
@@ -24,56 +28,6 @@ function normalizeUsername(username) {
 
 function normalizeEmail(email) {
   return email.trim().toLowerCase();
-}
-
-function createPublicUser(user) {
-  return {
-    id: user.id,
-    fullName: user.fullName,
-    username: user.username,
-    email: user.email,
-    roles: user.roles,
-    authenticationSource:
-      user.authenticationSource,
-    lastLoginAt: user.lastLoginAt,
-  };
-}
-
-function determineRedirectPath(roles) {
-  /*
-   * Checked first: an Action Team HOD's only page is Ticket, and this
-   * role never overlaps with EHS_OFFICER/ADMIN.
-   */
-  if (roles.includes(USER_ROLES.ACTION_HOD)) {
-    return "/tickets";
-  }
-
-  if (
-    roles.includes(USER_ROLES.EHS_OFFICER) ||
-    roles.includes(USER_ROLES.ADMIN)
-  ) {
-    return "/ehs-officer";
-  }
-
-  return "/dashboard";
-}
-
-function createAccessToken(user) {
-  return jwt.sign(
-    {
-      sub: String(user.id),
-      username: user.username,
-      roles: user.roles,
-      tokenType: "access",
-    },
-    environment.authentication.jwtSecret,
-    {
-      expiresIn:
-        environment.authentication.jwtExpiresIn,
-      issuer: "ehs-inspection-api",
-      audience: "ehs-inspection-frontend",
-    },
-  );
 }
 
 export async function signup(
@@ -254,10 +208,14 @@ export async function login(
     );
   }
 
-  if (
-    user.authenticationSource !== "LOCAL" ||
-    !user.passwordHash
-  ) {
+  /*
+   * Password sign-in is the failsafe for the day Entra is unreachable,
+   * so the test is "does this account have a password", not "was it
+   * created locally". An account that started out local and has since
+   * been linked to a directory identity keeps both routes in; an
+   * account provisioned by Entra never had a password and has only one.
+   */
+  if (!user.passwordHash) {
     throw new AppError(
       "This account must sign in using Microsoft Entra ID.",
       400,

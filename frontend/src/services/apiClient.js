@@ -1,4 +1,9 @@
-const API_BASE_URL =
+/*
+ * Exported because single sign-on cannot go through fetch: the browser
+ * itself has to follow the redirect to Microsoft, so the sign-in page
+ * needs to build an absolute location from the same base.
+ */
+export const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL ??
   "/api";
 

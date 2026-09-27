@@ -96,3 +96,45 @@ export async function uploadRoster(
     next(error);
   }
 }
+
+export async function getInspectionReport(
+  req,
+  res,
+  next,
+) {
+  try {
+    const report =
+      await patrolService.getInspectionReport({
+        userId: req.user.id,
+      });
+
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${report.fileName}"`,
+    );
+
+    /*
+     * The browser fetches this through apiClient, which cannot read a
+     * response header it was not told to expose. Without this the file
+     * downloads under a generated name.
+     */
+    res.setHeader(
+      "Access-Control-Expose-Headers",
+      "Content-Disposition",
+    );
+
+    res.setHeader(
+      "Cache-Control",
+      "no-store",
+    );
+
+    res.status(200).send(report.buffer);
+  } catch (error) {
+    next(error);
+  }
+}

@@ -141,7 +141,7 @@ export function SubmittedObservationList({
 
         const showLifecycle =
           !report.noObservations &&
-          (report.closure || report.ticket);
+          Boolean(report.closure);
 
         return (
           <li key={assignment.id}>

@@ -38,6 +38,11 @@ export default function useDashboard() {
   const [selectedPeriod, setSelectedPeriod] =
     useState(getInitialMonth);
 
+  /*
+   * Every field the pages read has to be listed here as well as in the
+   * mapping below: the response is copied field by field rather than
+   * spread, so anything missing from this shape is silently dropped.
+   */
   const [dashboardData, setDashboardData] =
     useState({
       role: "USER",
@@ -45,6 +50,8 @@ export default function useDashboard() {
       nextAudit: null,
       nextWeek: null,
       officerWeek: null,
+      metrics: null,
+      metricsPeriod: null,
     });
 
   const [loading, setLoading] =
@@ -83,6 +90,12 @@ export default function useDashboard() {
 
           officerWeek:
             data?.officerWeek ?? null,
+
+          metrics:
+            data?.metrics ?? null,
+
+          metricsPeriod:
+            data?.metricsPeriod ?? null,
         });
       } catch (requestError) {
         setDashboardData({
@@ -91,6 +104,8 @@ export default function useDashboard() {
           nextAudit: null,
           nextWeek: null,
           officerWeek: null,
+          metrics: null,
+          metricsPeriod: null,
         });
 
         setError(
@@ -154,6 +169,9 @@ export default function useDashboard() {
   return {
     selectedPeriod,
     role: dashboardData.role,
+    metrics: dashboardData.metrics,
+    metricsPeriod:
+      dashboardData.metricsPeriod,
     audits: dashboardData.audits,
     nextAudit:
       dashboardData.nextAudit,

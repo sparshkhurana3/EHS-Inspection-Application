@@ -46,7 +46,9 @@ Line references are as of commit `24bb98a`.
 
 ### dashboard
 
-- **Page**: header copy varies by role; "Refresh dashboard" button (never disabled); error alert; a "navigation unavailable" warning; `PatrolCalendar`; then `WeeklySummary` for management roles or `AuditStatusCards` for everyone else. Whole page is a spinner while loading.
+- **Metrics** (`DashboardMetrics`, above `PatrolCalendar`): year-to-date tiles from `metrics`/`metricsPeriod`. Three for management, two for a user; `scope` (`PLANT` | `SELF`) picks which. A tile with an `of` prop draws a progress bar, one without is a plain total. Returns `null` when `metrics` is absent, so an older API response degrades to the previous layout.
+- **`useDashboard` copies the response field by field**, so anything a page needs must be listed in *both* the initial state and the success mapping. `metrics` was returned by the API for months and silently dropped here because it was in neither.
+- **Page**: header copy varies by role; "Refresh dashboard" button (never disabled); error alert; a "navigation unavailable" warning; `DashboardMetrics`; `PatrolCalendar`; then `OfficerWeekCard` (EHS Officer), `WeeklySummary` (other management roles) or `AuditStatusCards` for everyone else. Whole page is a spinner while loading.
 - **Deep links**: clicking an audit card builds `/observations?auditId=…` (auditor) or `/closures?auditId=…&reportId=…` (auditee with an open report). Neither target page reads those params.
 - `AuditStatusCards({ audit, onOpen })`: empty card, "task completed" card (checks `taskCompleted` / `taskState === "TASK_COMPLETED"` in both cases), or a clickable upcoming-audit card with an action caption.
 - `WeeklySummary({ week, expanded, onToggle })`: collapsible week card with a six-column audit list.
@@ -58,31 +60,26 @@ Line references are as of commit `24bb98a`.
 ### observations
 
 - **Page** (`ObservationPage`): two tabs kept in the query string — **This week** (`?` empty) and **Past 6 months** (`?view=history&filter=`). `?patrolId=` opens the form, `?reportId=` opens the detail, so dashboard deep links and the back button both work.
-- **This week**: `PendingObservationList` (each row shows `Due Thu …` or an `Overdue` chip, and two buttons: *Fill report* and *No observation to record*, the latter behind a `window.confirm`) and `SubmittedObservationList` (status chip = `displayStatus`, meta line = "N observations · highest risk HIGH", plus `lifecycleLabel` once a closure or ticket exists).
+- **This week**: `PendingObservationList` (each row shows `Due Thu …` or an `Overdue` chip, and two buttons: *Fill report* and *No observation to record*, the latter behind a `window.confirm`) and `SubmittedObservationList` (status chip = `displayStatus`, meta line = "N observations · highest risk HIGH", plus `lifecycleLabel` once a closure exists).
 - **Form** (`ObservationCard`): the header fields appear **once** (week number, audit date, location, unit, zone, auditor, auditee, EHS Officer, finding date); then one `ObservationItemFields` per observation — area, category, `PhotographInput`, description with word count, `RiskSelector` — with **Add another observation** up to 10 and a Remove button when more than one. Field ids are suffixed with the index so labels stay unique.
-- **Detail** (`ObservationDetail`): header once, then one block per observation with its own photograph, then a "Closure and corrective action" block when a closure or ticket exists.
-- **History** (`ObservationHistory`): filter select (All / Closed via ticket / No observations / In progress) over a six-column row grid; clicking a row opens the detail with the filter preserved.
+- **Detail** (`ObservationDetail`): header once, then one block per observation with its own photograph, then a "Closure and corrective action" block when a closure exists.
+- **History** (`ObservationHistory`): filter select (All / Closed / No observations / In progress) over a six-column row grid; clicking a row opens the detail with the filter preserved.
 - **Hooks** (`useObservations.js`): `useWeeklyObservations`, `useObservationForm` (array of items, each with its own photograph and preview URL; every URL revoked on reset/unmount), `useNoObservation`, `useObservationHistory(filter)`, `useObservationDetail` (fetches each item's photograph into `photographs` keyed by item id).
 - **Service**: `GET /observations/current-assignments`, `GET /observations/history?filter=`, `GET /observations/:id`, `POST /observations` (multipart: `patrolId`, `findingDate`, `observations` JSON, `photographs` files in matching order), `POST /observations/no-observation`, and the two photograph blob routes.
-
-### tickets
-
-- **Page** (`TicketPage`, `ACTION_HOD` only): tabs **Tickets** / **History** in the query string (`?view=history&filter=`). Tickets tab lists Open, In progress, **Pending approval**, and Closed in the last 30 days; History (`TicketHistory`) is six months of the HOD's own tickets with a status filter.
-- **`TicketActionPanel`**: OPEN → accept or "Reject and send for approval"; IN_PROGRESS → evidence input plus a **Resolution** block (required "what was done", editable type of work) and **Submit resolution for approval**; PENDING_APPROVAL → read-only "Awaiting EHS Officer approval"; CLOSED → the outcome and who approved it. A reopened ticket shows a warning banner with the officer's reason.
-- **Officer side**: `features/closures/TicketApprovalQueuePage.jsx` (reached from the Closures page's **Ticket approvals** button, `?view=ticket-approvals`) lists what HODs have sent and offers **Approve and close** or **Reopen and send back** (required reason, confirmed because it deletes their photographs).
-- **Hooks** (`useTickets.js`): `useHodTickets` (four buckets), `useTicketDetail`, `useTicketDecision`, `useTicketEvidence`, `useSubmitResolution`, `useTicketHistory(filter)`, `useTicketApprovals`.
 
 ### closures
 
 - **Page** (`ClosurePage`): the auditee's pending/lapsed/completed lists, or one closure's detail (`?closureId=`), or the EHS Officer's approval queue (`?view=approvals`).
-- **Detail**: `ObservationSummary` (every observation with its own photograph) then `ActionPlanForm`, which renders the closure header once — observation count, `n/m tickets resolved`, status chip — and one **`ActionPlanItemForm`** per observation: that observation's description and photograph, its own action plan, target date and "Assign to department" select, and its own `TicketStatusCard`. Each item saves independently; fields disable once that department has decided, with a note saying why. One page-level **Send closure for approval** button, enabled by `closure.canSubmitForClosure`.
+- **Detail**: `ObservationSummary` (every observation with its own photograph) then `ActionPlanForm`, which renders the closure header once — observation count, `n/m planned`, evidence count, status chip — and one **`ActionPlanItemForm`** per observation: that observation's description and photograph, its own action plan and target date, and a **`ClosureEvidencePanel`** holding up to three photographs. Each item saves independently. One page-level **Send closure for approval** button, enabled by `closure.canSubmitForClosure` (every observation planned; evidence optional).
+- **`ClosureEvidencePanel`**: the evidence route is authenticated, so each photograph is fetched as a blob by `useClosureEvidence` and shown from an object URL, revoked on unmount. Read-only (`editable={false}`) in the officer's `ClosureItemSummary`, where Attach and Remove disappear.
 - **`ClosureItemSummary`**: the read-only version of the same block, used by the approval queue and the officer's dashboard zone view.
 - **Hooks** (`useClosures.js`): `useAuditeeClosures`, `useClosureDetail` (closure + every observation's photograph keyed by observation id), `useActionHodOptions` (plant-scoped, shared by every item), `useClosureItemForm({ closureId, item, onSaved })` — one per observation — and `useClosureSubmission`.
 - **Service**: `GET /closures`, `GET /closures/pending-approvals`, `GET /closures/:id`, `GET /closures/:id/action-hods`, `PATCH /closures/:id/items/:itemId/action-plan`, `POST /closures/:id/submit|approve|reject`.
 
 ### patrols
 
-- **Page** `PlanningPage`: spinner → header with "Refresh Users" and "Schedule an Audit" → alerts → last scheduled patrol summary (status hard-coded "Scheduled") → `PatrolForm` or empty state. Labels itself "EHS Officer workflow" but is reachable by any user.
+- **Inspection report**: a "Download inspection report" button in the Plan page header, backed by `useInspectionReport`. The route is authenticated, so the file is fetched with `apiBlobRequest` and handed to the browser through a temporary object URL — a plain `<a href>` could not carry the Bearer token.
+- **Page** `PlanningPage`: spinner → header with the report download → a note describing the report → `RosterUploadPanel` (upload, template download, current roster) → the single-audit exception form. Gated to `PLANNING_ROLES` by `RequireRole`, and the API enforces it too.
 - `PatrolForm`: selects for `location` (five plants, different order from the observation list), `unit` (`"1"`–`"5"`, hard-coded), `zone` (`"1"`–`"9"`, hard-coded), `areaDetail` (nine hard-coded areas), `scheduledDate` (`min` = today), `auditorId`, `auditeeId` (from lookups). Submit disabled when either user list is empty.
 - **Hook** `usePatrols`: validation order location → unit → zone → areaDetail → scheduledDate (required + parseable, no JS future check) → auditorId → auditeeId → auditor ≠ auditee. Coerces ids with `Number()`.
 - **Service**: `GET /patrols/planning-lookups`, `POST /patrols` `{ location, unit, zone, areaDetail, scheduledDate, auditorId, auditeeId }`.

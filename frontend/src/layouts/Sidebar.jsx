@@ -8,7 +8,6 @@ import {
 
 import {
   canPlanAudits,
-  isActionHod,
 } from "../constants/roles.js";
 
 const NAVIGATION_ITEMS = [
@@ -28,12 +27,6 @@ const NAVIGATION_ITEMS = [
     icon: "C",
   },
 ];
-
-const TICKET_ITEM = {
-  label: "Ticket",
-  path: "/tickets",
-  icon: "T",
-};
 
 function getNavigationClassName({ isActive }) {
   return isActive
@@ -69,13 +62,6 @@ export default function Sidebar() {
 
   const showPlanLink = canPlanAudits(user);
 
-  /*
-   * The Action Team HOD's only page is Ticket: the ordinary workflow
-   * links are hidden for them, and the Ticket link is hidden for
-   * everyone else. Matches the route gating in app/routes.jsx.
-   */
-  const ticketOnly = isActionHod(user);
-
   return (
     <aside className="app-sidebar">
       <div className="sidebar-brand">
@@ -96,25 +82,19 @@ export default function Sidebar() {
         className="sidebar-navigation"
         aria-label="Primary navigation"
       >
-        {ticketOnly ? (
-          <SidebarLink {...TICKET_ITEM} />
-        ) : (
-          <>
-            {NAVIGATION_ITEMS.map((item) => (
-              <SidebarLink
-                key={item.path}
-                {...item}
-              />
-            ))}
+        {NAVIGATION_ITEMS.map((item) => (
+          <SidebarLink
+            key={item.path}
+            {...item}
+          />
+        ))}
 
-            {showPlanLink && (
-              <SidebarLink
-                label="Plan"
-                path="/plan"
-                icon="P"
-              />
-            )}
-          </>
+        {showPlanLink && (
+          <SidebarLink
+            label="Plan"
+            path="/plan"
+            icon="P"
+          />
         )}
       </nav>
 

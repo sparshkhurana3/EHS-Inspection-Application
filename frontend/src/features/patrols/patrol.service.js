@@ -1,4 +1,5 @@
 import {
+  apiBlobRequest,
   apiRequest,
 } from "../../services/apiClient.js";
 
@@ -62,4 +63,17 @@ export function uploadRoster(file) {
     method: "POST",
     body,
   });
+}
+
+/**
+ * The zone-by-week inspection report as an .xlsx file.
+ *
+ * Fetched as a blob rather than linked to, because the route needs the
+ * Bearer token and a plain <a href> cannot carry one.
+ */
+export function fetchInspectionReport() {
+  return apiBlobRequest(
+    "/patrols/inspection-report",
+    { method: "GET" },
+  );
 }

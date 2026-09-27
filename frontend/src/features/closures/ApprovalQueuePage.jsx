@@ -39,9 +39,9 @@ export default function ApprovalQueuePage() {
     ) ?? null;
 
   /*
-   * The queue list response has no ticket data; fetching the full
-   * closure for whichever row is selected is what carries the embedded
-   * ticket (with evidence) into this page.
+   * The queue list response has no item detail; fetching the full
+   * closure for whichever row is selected is what carries each
+   * observation's action plan and evidence into this page.
    */
   const {
     closure: selectedDetail,
@@ -160,6 +160,7 @@ export default function ApprovalQueuePage() {
             (item) => (
               <ClosureItemSummary
                 key={item.id}
+                closureId={selectedDetail.id}
                 item={item}
                 total={
                   selectedDetail.items.length
