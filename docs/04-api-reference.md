@@ -53,7 +53,7 @@ Transaction: insert `users` (`LOCAL`), link role `USER`, insert `authentication_
   "user": { "id", "fullName", "username", "email", "roles": ["USER"], "authenticationSource": "LOCAL", "lastLoginAt": null },
   "redirectTo": "/dashboard" }
 ```
-Errors: `USERNAME_ALREADY_EXISTS` 409, `EMAIL_ALREADY_EXISTS` 409, `ACCOUNT_ALREADY_EXISTS` 409 (PG 23505).
+Errors: `SELF_SIGNUP_DISABLED` 403 (self sign-up is closed: the default once Entra ID is configured), `USERNAME_ALREADY_EXISTS` 409, `EMAIL_ALREADY_EXISTS` 409, `ACCOUNT_ALREADY_EXISTS` 409 (PG 23505).
 
 ### `POST /api/auth/login` — no auth
 
@@ -72,7 +72,9 @@ Errors: `INVALID_CREDENTIALS` 401, `ACCOUNT_DISABLED` 403, `ACCOUNT_TEMPORARILY_
 ### `GET /api/auth/providers` — no auth
 Which sign-in methods this deployment offers, so the sign-in page knows whether to draw the SSO button. Deliberately public and deliberately uninformative.
 
-`200 { "providers": { "local": { "enabled": true }, "entra": { "enabled": false, "label": null } } }`
+`200 { "providers": { "local": { "enabled": true, "signupEnabled": true }, "entra": { "enabled": false, "label": null } } }`
+
+`signupEnabled` mirrors `SELF_SIGNUP_ENABLED` (open without Entra, closed once Entra is configured, unless forced); the home, sign-in and sign-up pages hide their sign-up links when it is `false`.
 
 When Entra is configured, `label` carries `ENTRA_BUTTON_LABEL` (default `"Login with Entra SSO"`).
 
@@ -169,7 +171,7 @@ One observation's photograph. Same access rule as the report detail: auditor, au
 
 ### `POST /api/observations` — `multipart/form-data`
 
-Files field `photographs`: JPEG/PNG/SVG, ≤10 MB each, **up to 10**, one per observation and **in the same order** as `observations`, stored as `uploads/observations/<uuid>.<ext>`. nginx allows a 110 MB body to fit ten of them.
+Files field `photographs`: JPEG/PNG/SVG, ≤10 MB each, **up to 10**, one per observation and **in the same order** as `observations`, stored as `uploads/observations/<uuid>.<ext>`. nginx allows a 110 MB body to fit ten of them. **What is stored is a compressed copy**: each JPEG/PNG is re-encoded after validation (EXIF orientation applied, long edge ≤ 2048 px, JPEG quality 80, metadata stripped). A JPEG stays JPEG; a PNG stays PNG if it is transparent, otherwise it becomes the smaller of JPEG and PNG. SVG is stored as sent. Only real JPEG and PNG content is decoded (an SVG or WebP labelled `image/jpeg` is refused), and images over 120 megapixels are refused. The 10 MB limit applies to the upload, not to the stored file. With `PHOTO_STORAGE=sharepoint` the compressed file is then uploaded to SharePoint before the report is written; if that fails the request answers **503 `PHOTO_STORAGE_UNAVAILABLE`** with a message meant for the user, and nothing is saved.
 
 | Field | Rules |
 |---|---|
@@ -190,7 +192,7 @@ Transaction: patrol must exist with `auditor_id = caller` → no existing report
 ```
 `status` is normalised (`CLOSED|COMPLETED|APPROVED` → `CLOSED`); `displayStatus` is `"Closed"` or `"In Progress"`.
 
-Errors: `UNSUPPORTED_OBSERVATION_IMAGE`, `OBSERVATION_IMAGE_TOO_LARGE`, `TOO_MANY_OBSERVATION_IMAGES`, `OBSERVATION_UPLOAD_FAILED`, `OBSERVATION_PHOTOGRAPH_COUNT_MISMATCH`, `OBSERVATION_REQUIRED`, `TOO_MANY_OBSERVATIONS`, `AREA_NOT_IN_PATROL_ZONE` (all 400); `ASSIGNED_PATROL_NOT_FOUND` 404; `OBSERVATION_REPORT_ALREADY_EXISTS` 409; `PATROL_STATUS_NOT_ELIGIBLE` 409. Every uploaded file is deleted on any failure.
+Errors: `UNSUPPORTED_OBSERVATION_IMAGE`, `OBSERVATION_IMAGE_TOO_LARGE`, `TOO_MANY_OBSERVATION_IMAGES`, `OBSERVATION_UPLOAD_FAILED`, `UNREADABLE_OBSERVATION_IMAGE` (a JPEG/PNG that will not decode), `OBSERVATION_PHOTOGRAPH_COUNT_MISMATCH`, `OBSERVATION_REQUIRED`, `TOO_MANY_OBSERVATIONS`, `AREA_NOT_IN_PATROL_ZONE` (all 400); `ASSIGNED_PATROL_NOT_FOUND` 404; `OBSERVATION_REPORT_ALREADY_EXISTS` 409; `PATROL_STATUS_NOT_ELIGIBLE` 409. Every uploaded file is deleted on any failure.
 
 ### `GET /api/observations/:reportId/photograph`
 Caller must be the patrol's auditor, auditee, or EHS officer. Path is resolved under `<cwd>/uploads/observations/` (traversal guard) and must exist.
@@ -225,11 +227,11 @@ In one transaction: lock the closure → check the item belongs to it and is sti
 `200 { message, closure }` with the full `items[]`. Errors: `CLOSURE_ASSIGNMENT_NOT_FOUND` 404, `CLOSURE_ITEM_NOT_FOUND` 404, `CLOSURE_ACTION_PLAN_LOCKED` 409, plus the action-plan validation codes.
 
 ### `POST /api/closures/:closureId/items/:closureItemId/evidence`
-`multipart/form-data`, field **`evidence`**, 1–3 JPEG/PNG/SVG files of 10 MB each: photographs proving this observation's action plan was carried out. Auditee only, and only while the closure is editable.
+`multipart/form-data`, field **`evidence`**, 1–3 JPEG/PNG/SVG files of 10 MB each: photographs proving this observation's action plan was carried out. Auditee only, and only while the closure is editable. Stored compressed, the same way as observation photographs.
 
 The three-per-observation cap is checked inside the transaction against a locked count, so concurrent uploads cannot exceed it together. Files multer has already written are deleted again on any failure.
 
-`201 { message, closure }`. Errors: `EVIDENCE_REQUIRED` 400, `TOO_MANY_EVIDENCE_IMAGES` 400, `UNSUPPORTED_EVIDENCE_IMAGE` 400, `EVIDENCE_IMAGE_TOO_LARGE` 400, `CLOSURE_ACTION_PLAN_LOCKED` 409, `CLOSURE_ITEM_NOT_FOUND` 404.
+`201 { message, closure }`. Errors: `EVIDENCE_REQUIRED` 400, `TOO_MANY_EVIDENCE_IMAGES` 400, `UNSUPPORTED_EVIDENCE_IMAGE` 400, `EVIDENCE_IMAGE_TOO_LARGE` 400, `UNREADABLE_EVIDENCE_IMAGE` 400, `CLOSURE_ACTION_PLAN_LOCKED` 409, `CLOSURE_ITEM_NOT_FOUND` 404.
 
 ### `DELETE /api/closures/:closureId/items/:closureItemId/evidence/:evidenceId`
 Removes one photograph. The row goes first and the file only after the commit. `200 { message, closure }`. Errors: `EVIDENCE_NOT_FOUND` 404, `CLOSURE_ACTION_PLAN_LOCKED` 409.
@@ -272,7 +274,9 @@ The zone-by-week inspection report as an `.xlsx` download, scoped to the officer
 
 Responds with the spreadsheet bytes, `Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`, `Content-Disposition: attachment; filename="inspection-report-<plant>-<date>.xlsx"`, and `Access-Control-Expose-Headers: Content-Disposition` so a cross-origin fetch can read the filename.
 
-Sheet layout: three merged title rows (title, plant and period, legend), then a header row, then one row per zone. Fixed columns are Unit, Zone, Auditor, Auditee, Done, Scheduled; after them one column per inspection week, headed `W<iso>` and the Monday's date. Panes freeze at `G5` and an autofilter covers the fixed columns.
+Sheet layout: three merged title rows (title, plant and period, legend), then a header row, then one row per zone. Fixed columns are Unit, Zone, Zone Areas, Auditor, Auditee, Done, Scheduled; after them one column per inspection week, headed `W<iso>` and the Monday's date. Panes freeze at `H5` and an autofilter covers the fixed columns.
+
+**Zone Areas** lists the zone's active `zone_areas` rows, comma-separated in `display_order` then name, wrapped so a long list takes a second line rather than widening the frozen block. It is the zone's configured list **as of when the report is generated**, not the areas that were inspected; a zone with no active areas reads `None configured`.
 
 Each week cell is green (`Done`), red (`Not done`) or grey (`–`, nothing scheduled that week). **Colour and text both carry the status**, so the sheet survives printing in black and white. A week where a zone had several audits is green only when all of them were filed.
 

@@ -15,6 +15,10 @@ import {
 } from "../../middleware/validate.js";
 
 import {
+  discardUploadsOnError,
+} from "../../middleware/storeUploadedFiles.js";
+
+import {
   MANAGEMENT_ROLES,
 } from "../../shared/constants/roles.js";
 
@@ -41,7 +45,9 @@ import {
 } from "./closure.validator.js";
 
 import {
+  compressClosureEvidence,
   handleClosureUploadError,
+  storeClosureEvidence,
   uploadClosureEvidence,
 } from "./closureUpload.js";
 
@@ -95,7 +101,8 @@ router.patch(
  *
  * The upload middleware runs before validation because multer is what
  * parses a multipart body; the route parameters are checked straight
- * afterwards, before anything touches the database.
+ * afterwards, before anything touches the database. Compression comes
+ * last, so a request that fails validation never decodes its images.
  */
 router.post(
   "/:closureId/items/:closureItemId/evidence",
@@ -104,6 +111,9 @@ router.post(
   handleClosureUploadError,
   closureItemValidationRules,
   validate,
+  compressClosureEvidence,
+  storeClosureEvidence,
+  discardUploadsOnError,
   addClosureItemEvidence,
 );
 

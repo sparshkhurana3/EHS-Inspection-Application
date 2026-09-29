@@ -100,7 +100,7 @@ Since migration 013 a report holds **1–10 observations** in `observation_items
 | `category` | `UA` \| `UC` |
 | `description` | text; service limits to 500 words |
 | `risk_category` | `HIGH` \| `MEDIUM` \| `LOW` |
-| `photograph_path`, `photograph_original_name`, `photograph_mime_type`, `photograph_size` | file stored on disk under `backend/uploads/observations/<uuid>.<ext>`; only the path is in the DB |
+| `photograph_path`, `photograph_original_name`, `photograph_mime_type`, `photograph_size` | only the location is in the DB: an absolute path under `backend/uploads/observations/<uuid>.<ext>`, or `sharepoint:<driveId>/<itemId>` when stored in SharePoint (`PHOTO_STORAGE=sharepoint`); both kinds coexist. Describe the **compressed** copy (see [02](02-architecture.md#cross-cutting)): a JPEG for a JPEG upload, PNG or JPEG (whichever is smaller, PNG if transparent) for a PNG, the SVG as sent; a PNG converted to JPEG has its original name's extension changed to `.jpg`. Rows written before compression was introduced describe the original upload |
 | `status` | `OPEN` \| `PENDING_AUDITEE_ACTION` \| `PENDING_EHS_APPROVAL` \| `REEXAMINATION_REQUIRED` \| `CLOSED` |
 | `submitted_at`, `updated_at`, `closed_at` | |
 | `no_observations` | boolean, default `FALSE`; `TRUE` for a "No observation to record" closure (migration 013) |

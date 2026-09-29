@@ -4,7 +4,7 @@
 
 | Tool | Version | Implication |
 |---|---|---|
-| Node (system) | v12.22.9 | **Cannot run this app natively.** Express 5 needs ≥18, Vite 8 / `@vitejs/plugin-react` 6 need `^20.19 \|\| >=22.12`, react-router 7 needs ≥20. Use Docker (see plan) or install Node 22 via nvm. |
+| Node (system) | v12.22.9 | **Cannot run this app natively.** Express 5 needs ≥18, `sharp` 0.35 (photograph compression) needs ≥20.9, Vite 8 / `@vitejs/plugin-react` 6 need `^20.19 \|\| >=22.12`, react-router 7 needs ≥20. Use Docker (see plan) or install Node 22 via nvm. |
 | npm | 8.5.1 | Old but works for `npm ci`. npm ≥7 auto-installs peer deps, which is the only reason `react`/`react-dom` get installed (they are not declared in `frontend/package.json`). |
 | Docker / Compose | 29.8 / v5.5.1 | Fine. Compose v2 syntax (`docker compose`, `compose.yaml`). |
 

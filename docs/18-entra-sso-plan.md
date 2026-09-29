@@ -108,15 +108,17 @@ their own 5xx detail.
 ## Role mapping
 
 `roles` claim → `ENTRA_ROLE_MAP` translation → `normalizeRole` → kept
-only if it is one of the six codes in `shared/constants/roles.js`.
+only if it is one of the five codes in `shared/constants/roles.js`
+(`USER`, `EHS_OFFICER`, `HOD`, `PLANT_HEAD`, `ADMIN`).
 
 - Unrecognised values are **dropped and logged**, not rejected: a typo
-  in the Entra manifest must not be able to lock everyone out.
-- `ACTION_HOD` is forced to stand alone, preserving the invariant in
-  `13-action-ticket-plan.md` that keeps a ticket HOD off every other
-  page. An over-generous assignment in the admin centre cannot widen it.
+  in the Entra manifest must not be able to lock everyone out. That
+  includes `ACTION_HOD`, which migration 018 removed with the ticket
+  system; an Entra role still carrying that value now grants nothing.
 - An empty result falls back to `ENTRA_DEFAULT_ROLE` (`USER` by
-  default); setting it empty refuses the sign-in instead.
+  default); setting it empty refuses the sign-in instead. compose.yaml
+  passes it as `${ENTRA_DEFAULT_ROLE-USER}` so that an empty value in
+  `.env` survives interpolation.
 
 ## Account matching
 
@@ -151,10 +153,17 @@ confirmed in a real browser.
 - **Sign-out is local only.** Clearing the token ends the app session
   but not the Microsoft session, so pressing the button again may sign
   the person straight back in. Front-channel logout is not wired up.
-- **`plant_id` and `department_id` are not set from Entra.** A
-  just-in-time account gets neither, so an administrator must still set
-  the department for an `ACTION_HOD` before tickets can route to them.
-  Mapping these from directory attributes is the obvious next step.
+- **`plant_id` is not set from Entra.** A just-in-time account gets
+  none, and the roster matches people only at the officer's plant, so
+  staff are imported with their plant beforehand
+  (`scripts/admin.js import-users`, SETUP-GUIDE.md §9). Mapping it from
+  a directory attribute is the obvious next step.
+- **Disabling someone in Entra stops new sign-ins only.** The app's own
+  session lasts up to `JWT_EXPIRES_IN` (8 h); `admin.js deactivate-user`
+  cuts it off at the next request.
+- **Self sign-up closes once Entra is configured** (`SELF_SIGNUP_ENABLED`
+  overrides), because an open sign-up page would let anyone create a
+  password account that a colleague's first SSO sign-in then links to.
 - **A warm discovery cache masks an Entra outage at `/start`.** The
   browser is redirected to Microsoft and discovers the outage there,
   rather than being told up front. Only a cold backend reports it

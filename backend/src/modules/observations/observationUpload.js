@@ -3,6 +3,14 @@ import path from "node:path";
 
 import multer from "multer";
 
+import {
+  compressUploadedImages,
+} from "../../middleware/compressUploadedImages.js";
+
+import {
+  storeUploadedFiles,
+} from "../../middleware/storeUploadedFiles.js";
+
 import AppError from "../../shared/errors/AppError.js";
 
 const MAX_IMAGE_SIZE =
@@ -84,6 +92,23 @@ export const uploadObservationPhotographs =
     "photographs",
     MAX_OBSERVATIONS_PER_REPORT,
   );
+
+/*
+ * The 10 MB limit above applies to what the phone sends; what is stored
+ * is the compressed copy this produces.
+ */
+export const compressObservationPhotographs =
+  compressUploadedImages({
+    errorCode: "UNREADABLE_OBSERVATION_IMAGE",
+    errorMessage:
+      "An observation photograph could not be read as an image. Take or attach it again.",
+  });
+
+/* Moves them into SharePoint when PHOTO_STORAGE=sharepoint. */
+export const storeObservationPhotographs =
+  storeUploadedFiles({
+    folder: "Observations",
+  });
 
 export function handleObservationUploadError(
   error,

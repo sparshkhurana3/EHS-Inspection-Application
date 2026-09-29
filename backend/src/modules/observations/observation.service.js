@@ -1,5 +1,4 @@
 import {
-  unlink,
   access,
 } from "node:fs/promises";
 
@@ -11,6 +10,11 @@ import {
 
 import AppError
   from "../../shared/errors/AppError.js";
+
+import {
+  isSharePointReference,
+  removeStoredFiles,
+} from "../../shared/storage/storedFiles.js";
 
 import * as observationRepository
   from "./observation.repository.js";
@@ -99,29 +103,15 @@ function countWords(value) {
     .length;
 }
 
-async function safelyDeleteFile(
-  filePath,
-) {
-  if (!filePath) {
-    return;
-  }
-
-  try {
-    await unlink(filePath);
-  } catch (error) {
-    if (error.code !== "ENOENT") {
-      console.error(
-        "Unable to remove uploaded observation file:",
-        error,
-      );
-    }
-  }
-}
-
+/*
+ * By the time the service runs, each file's `path` is either a staged
+ * file on the uploads volume or a SharePoint reference; the shared
+ * helper removes either and never throws.
+ */
 async function safelyDeleteFiles(files) {
-  await Promise.all(
-    (files ?? []).map((file) =>
-      safelyDeleteFile(file?.path),
+  await removeStoredFiles(
+    (files ?? []).map(
+      (file) => file?.path,
     ),
   );
 }
@@ -144,6 +134,35 @@ async function resolvePhotographFile(
       404,
       "OBSERVATION_PHOTOGRAPH_NOT_FOUND",
     );
+  }
+
+  const originalName =
+    photograph.photograph_original_name ??
+    "observation-photograph";
+
+  const mimeType =
+    photograph.photograph_mime_type ??
+    "application/octet-stream";
+
+  /*
+   * A SharePoint photograph is checked for existence when it is
+   * fetched, by sendStoredFile, which answers with these if it is gone.
+   */
+  if (
+    isSharePointReference(
+      photograph.photograph_path,
+    )
+  ) {
+    return {
+      sharePointReference:
+        photograph.photograph_path,
+      originalName,
+      mimeType,
+      missingMessage:
+        "The observation photograph file is unavailable.",
+      missingCode:
+        "OBSERVATION_PHOTOGRAPH_FILE_NOT_FOUND",
+    };
   }
 
   const absolutePath = path.resolve(
@@ -182,16 +201,8 @@ async function resolvePhotographFile(
 
   return {
     absolutePath,
-
-    originalName:
-      photograph
-        .photograph_original_name ??
-      "observation-photograph",
-
-    mimeType:
-      photograph
-        .photograph_mime_type ??
-      "application/octet-stream",
+    originalName,
+    mimeType,
   };
 }
 

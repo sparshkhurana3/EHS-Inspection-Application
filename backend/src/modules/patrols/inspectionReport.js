@@ -11,13 +11,19 @@ import ExcelJS from "exceljs";
  * status survives being pasted somewhere that drops the formatting.
  */
 
+/*
+ * `wrap` lets a zone's area list run onto a second line rather than
+ * widening the frozen block and pushing the weeks off screen. `centred`
+ * marks the two count columns, which read as numbers like the weeks.
+ */
 const FIXED_COLUMNS = [
   { header: "Unit", width: 18 },
   { header: "Zone", width: 20 },
+  { header: "Zone Areas", width: 22, wrap: true },
   { header: "Auditor", width: 24 },
   { header: "Auditee", width: 24 },
-  { header: "Done", width: 8 },
-  { header: "Scheduled", width: 11 },
+  { header: "Done", width: 8, centred: true },
+  { header: "Scheduled", width: 11, centred: true },
 ];
 
 const WEEK_COLUMN_WIDTH = 13;
@@ -209,9 +215,14 @@ export async function buildInspectionReportWorkbook({
         : "Not done";
     });
 
+    const areaNames = zone.areaNames ?? [];
+
     const row = sheet.addRow([
       zone.unitName,
       zone.zoneName,
+      areaNames.length > 0
+        ? areaNames.join(", ")
+        : "None configured",
       zone.auditorName ?? "Not assigned",
       zone.auditeeName ?? "Not assigned",
       zone.conductedTotal,
@@ -221,11 +232,19 @@ export async function buildInspectionReportWorkbook({
 
     row.alignment = { vertical: "middle" };
 
-    /* The two count columns read as numbers, centred like the weeks. */
-    [5, 6].forEach((columnNumber) => {
-      row.getCell(columnNumber).alignment = {
-        horizontal: "center",
+    FIXED_COLUMNS.forEach((column, index) => {
+      if (!column.centred && !column.wrap) {
+        return;
+      }
+
+      row.getCell(index + 1).alignment = {
         vertical: "middle",
+        ...(column.centred
+          ? { horizontal: "center" }
+          : {}),
+        ...(column.wrap
+          ? { wrapText: true }
+          : {}),
       };
     });
 

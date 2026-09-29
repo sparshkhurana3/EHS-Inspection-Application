@@ -2,10 +2,19 @@
 # compose project, which holds host ports 8080 and 4000 on this machine.
 name: ehs-inspection
 
+# Docker's default json-file log driver never rotates, which on a server
+# that runs for years eventually fills the disk. 5 x 20 MB per service.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
 services:
   db:
     image: postgres:16-alpine
     restart: unless-stopped
+    logging: *default-logging
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
@@ -22,6 +31,7 @@ services:
   backend:
     build: ./backend
     restart: unless-stopped
+    logging: *default-logging
     environment:
       NODE_ENV: production
       PORT: "3000"
@@ -37,7 +47,13 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-8h}
       PASSWORD_SALT_ROUNDS: ${PASSWORD_SALT_ROUNDS:-12}
-      FRONTEND_ORIGIN: http://localhost:${APP_PORT:-8090}
+      # The https:// address people use to reach the app. Single sign-on
+      # sends the browser back here, so it must be the server's real
+      # name on any deployment other than a laptop.
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-https://localhost}
+      # Empty follows the identity setup: open without Entra, closed
+      # with it. See .env.example.
+      SELF_SIGNUP_ENABLED: ${SELF_SIGNUP_ENABLED:-}
       # Microsoft Entra ID single sign-on. Blank disables it and the
       # app falls back to username and password only, so the stack
       # still comes up on a machine that has no tenant configured.
@@ -47,7 +63,31 @@ services:
       ENTRA_REDIRECT_URI: ${ENTRA_REDIRECT_URI:-}
       ENTRA_ROLE_MAP: ${ENTRA_ROLE_MAP:-}
       ENTRA_AUTHORITY: ${ENTRA_AUTHORITY:-}
-      ENTRA_DEFAULT_ROLE: ${ENTRA_DEFAULT_ROLE:-USER}
+      ENTRA_SCOPES: ${ENTRA_SCOPES:-}
+      ENTRA_ROLE_CLAIM: ${ENTRA_ROLE_CLAIM:-}
+      ENTRA_BUTTON_LABEL: ${ENTRA_BUTTON_LABEL:-}
+      # "-" rather than ":-": unset means USER, but set-and-empty stays
+      # empty, which refuses a sign-in that carries no app role.
+      ENTRA_DEFAULT_ROLE: ${ENTRA_DEFAULT_ROLE-USER}
+      # Where new photographs are stored: "local" (the ehs_uploads
+      # volume) or "sharepoint" (a document library via Microsoft
+      # Graph). The volume stays mounted either way: uploads are staged
+      # there, and photographs taken before a switch still live there.
+      PHOTO_STORAGE: ${PHOTO_STORAGE:-local}
+      SHAREPOINT_SITE_URL: ${SHAREPOINT_SITE_URL:-}
+      SHAREPOINT_SITE_ID: ${SHAREPOINT_SITE_ID:-}
+      SHAREPOINT_LIBRARY: ${SHAREPOINT_LIBRARY:-}
+      SHAREPOINT_FOLDER: ${SHAREPOINT_FOLDER:-}
+      SHAREPOINT_TENANT_ID: ${SHAREPOINT_TENANT_ID:-}
+      SHAREPOINT_CLIENT_ID: ${SHAREPOINT_CLIENT_ID:-}
+      SHAREPOINT_CLIENT_SECRET: ${SHAREPOINT_CLIENT_SECRET:-}
+      SHAREPOINT_AUTHORITY: ${SHAREPOINT_AUTHORITY:-}
+      GRAPH_BASE_URL: ${GRAPH_BASE_URL:-}
+      # Only if the server reaches Microsoft (sign-in, Graph, SharePoint)
+      # through an outbound proxy: HTTPS_PROXY=http://proxy:8080 and
+      # NODE_USE_ENV_PROXY=1, which makes Node's fetch use it.
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NODE_USE_ENV_PROXY: ${NODE_USE_ENV_PROXY:-}
     volumes:
       - ehs_uploads:/app/uploads
     depends_on:
@@ -69,11 +109,17 @@ services:
       args:
         VITE_API_BASE_URL: /api
     restart: unless-stopped
+    logging: *default-logging
     depends_on:
       backend:
         condition: service_healthy
+    # HTTPS only: nginx listens on 443 and nothing is published for
+    # plain HTTP.
     ports:
-      - "${APP_PORT:-8090}:80"
+      - "${HTTPS_PORT:-443}:443"
+    # tls.crt (server certificate + intermediates) and tls.key, read-only.
+    volumes:
+      - ${TLS_CERT_DIR:-./certs}:/etc/nginx/certs:ro
 
 volumes:
   ehs_postgres_data:

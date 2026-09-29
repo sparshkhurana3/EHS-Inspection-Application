@@ -1,7 +1,9 @@
 import * as observationService
   from "./observation.service.js";
 
-import path from "node:path";
+import {
+  sendStoredFile,
+} from "../../shared/storage/storedFiles.js";
 
 export async function getWeeklyAssignments(
   req,
@@ -124,22 +126,9 @@ export async function getObservationPhotograph(
             req.params.reportId,
         });
 
-    res.type(photograph.mimeType);
-
-    res.setHeader(
-      "Content-Disposition",
-      `inline; filename="${path.basename(
-        photograph.originalName,
-      )}"`,
-    );
-
-    res.setHeader(
-      "Cache-Control",
-      "private, max-age=300",
-    );
-
-    res.sendFile(
-      photograph.absolutePath,
+    await sendStoredFile(
+      res,
+      photograph,
     );
   } catch (error) {
     next(error);
@@ -162,22 +151,9 @@ export async function getObservationItemPhotograph(
             req.params.itemId,
         });
 
-    res.type(photograph.mimeType);
-
-    res.setHeader(
-      "Content-Disposition",
-      `inline; filename="${path.basename(
-        photograph.originalName,
-      )}"`,
-    );
-
-    res.setHeader(
-      "Cache-Control",
-      "private, max-age=300",
-    );
-
-    res.sendFile(
-      photograph.absolutePath,
+    await sendStoredFile(
+      res,
+      photograph,
     );
   } catch (error) {
     next(error);

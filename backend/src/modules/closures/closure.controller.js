@@ -1,7 +1,9 @@
-import path from "node:path";
-
 import * as closureService
   from "./closure.service.js";
+
+import {
+  sendStoredFile,
+} from "../../shared/storage/storedFiles.js";
 
 export async function getAuditeeClosures(
   req,
@@ -221,21 +223,10 @@ export async function getClosureItemEvidence(
             req.params.evidenceId,
         });
 
-    res.type(evidence.mimeType);
-
-    res.setHeader(
-      "Content-Disposition",
-      `inline; filename="${path.basename(
-        evidence.originalName,
-      )}"`,
+    await sendStoredFile(
+      res,
+      evidence,
     );
-
-    res.setHeader(
-      "Cache-Control",
-      "private, max-age=300",
-    );
-
-    res.sendFile(evidence.absolutePath);
   } catch (error) {
     next(error);
   }

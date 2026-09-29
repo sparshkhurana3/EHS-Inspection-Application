@@ -13,3 +13,6 @@ backend/uploads/
 npm-debug.log*
 
 .DS_Store
+
+# TLS certificate and private key for the bundled nginx (compose.yaml).
+certs/

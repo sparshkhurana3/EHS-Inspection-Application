@@ -39,6 +39,14 @@ export async function signup(
   },
   requestContext,
 ) {
+  if (!environment.selfSignupEnabled) {
+    throw new AppError(
+      "Self sign-up is turned off for this deployment. Sign in with your company Microsoft account, or ask the EHS application administrator for an account.",
+      403,
+      "SELF_SIGNUP_DISABLED",
+    );
+  }
+
   const normalizedUsername =
     normalizeUsername(username);
 

@@ -7,6 +7,7 @@ import {
 import AuthLayout from "../../layouts/AuthLayout.jsx";
 import Button from "../../components/Button.jsx";
 import useAuth from "./useAuth.js";
+import useAuthProviders from "./useAuthProviders.js";
 
 const initialValues = {
   fullName: "",
@@ -31,6 +32,11 @@ export default function SignupPage() {
 
   const [localError, setLocalError] =
     useState("");
+
+  const {
+    isLoaded: providersLoaded,
+    signupEnabled,
+  } = useAuthProviders();
 
   function handleChange(event) {
   const fieldName = event.target.name;
@@ -106,6 +112,28 @@ export default function SignupPage() {
   }
 
   const displayedError = localError || error;
+
+  /*
+   * Once Entra ID is configured the directory decides who gets in, so
+   * self sign-up is normally closed. Say so instead of drawing a form
+   * the API would refuse.
+   */
+  if (providersLoaded && !signupEnabled) {
+    return (
+      <AuthLayout
+        title="Sign-up is not available"
+        description="Accounts for this application come from your company Microsoft account."
+      >
+        <p className="auth-switch-message">
+          Sign in with your company account. If you need a separate
+          account, ask the EHS application administrator.{" "}
+          <Link to="/sign-in">
+            Go to sign in
+          </Link>
+        </p>
+      </AuthLayout>
+    );
+  }
 
   return (
     <AuthLayout

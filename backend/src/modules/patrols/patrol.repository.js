@@ -980,6 +980,25 @@ export async function findZonesWithCurrentAssignment(
 
         plant_record.name AS plant_name,
 
+        /*
+         * The zone's fixed areas, in the order the planning form lists
+         * them. ARRAY() of an empty result is an empty array, not NULL,
+         * so a zone whose areas were all retired still maps cleanly.
+         */
+        ARRAY(
+          SELECT zone_area.name::TEXT
+
+          FROM zone_areas AS zone_area
+
+          WHERE
+            zone_area.zone_id = zone_record.id
+            AND zone_area.is_active
+
+          ORDER BY
+            zone_area.display_order,
+            zone_area.name
+        ) AS area_names,
+
         current_assignment.auditor_name,
         current_assignment.auditee_name,
         current_assignment.scheduled_date
@@ -1040,6 +1059,7 @@ export async function findZonesWithCurrentAssignment(
     unitName: row.unit_name,
     unitNumber: row.unit_number,
     plantName: row.plant_name,
+    areaNames: row.area_names ?? [],
     auditorName: row.auditor_name ?? null,
     auditeeName: row.auditee_name ?? null,
     assignmentDate:

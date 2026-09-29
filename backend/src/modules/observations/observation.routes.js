@@ -11,6 +11,10 @@ import {
 } from "../../middleware/validate.js";
 
 import {
+  discardUploadsOnError,
+} from "../../middleware/storeUploadedFiles.js";
+
+import {
   createObservation,
   getWeeklyAssignments,
   getObservationHistory,
@@ -29,7 +33,9 @@ import {
 } from "./observation.validator.js";
 
 import {
+  compressObservationPhotographs,
   handleObservationUploadError,
+  storeObservationPhotographs,
   uploadObservationPhotographs,
 } from "./observationUpload.js";
 
@@ -92,6 +98,9 @@ router.post(
   handleObservationUploadError,
   createObservationValidationRules,
   validate,
+  compressObservationPhotographs,
+  storeObservationPhotographs,
+  discardUploadsOnError,
   createObservation,
 );
 

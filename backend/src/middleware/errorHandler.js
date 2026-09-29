@@ -47,9 +47,15 @@ export function errorHandler(
     },
   );
 
+  /*
+   * 5xx messages are masked because they can describe internals. An
+   * error thrown with `expose = true` is written for the person using
+   * the app (for instance "document storage is unavailable, try again")
+   * and is shown as it is.
+   */
   res.status(statusCode).json({
     message:
-      statusCode >= 500
+      statusCode >= 500 && !error.expose
         ? "An unexpected server error occurred."
         : error.message,
 

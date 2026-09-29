@@ -1,4 +1,5 @@
 import Button from "../../components/Button.jsx";
+import useAuthProviders from "./useAuthProviders.js";
 
 function EhsBrand() {
   return (
@@ -46,6 +47,9 @@ function FeatureCard({
 }
 
 export default function HomePage() {
+  const { signupEnabled } =
+    useAuthProviders();
+
   return (
     <div className="home-page">
       <header className="home-header">
@@ -95,12 +99,14 @@ export default function HomePage() {
                   </span>
                 </Button>
 
-                <Button
-                  to="/sign-up"
-                  variant="secondary"
-                >
-                  Sign up
-                </Button>
+                {signupEnabled && (
+                  <Button
+                    to="/sign-up"
+                    variant="secondary"
+                  >
+                    Sign up
+                  </Button>
+                )}
               </div>
 
               <div className="home-security-note">

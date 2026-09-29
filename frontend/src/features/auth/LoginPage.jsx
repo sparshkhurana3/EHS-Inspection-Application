@@ -1,7 +1,4 @@
-import {
-  useEffect,
-  useState,
-} from "react";
+import { useState } from "react";
 import {
   Link,
   useNavigate,
@@ -12,7 +9,7 @@ import AuthLayout from "../../layouts/AuthLayout.jsx";
 import Button from "../../components/Button.jsx";
 import EntraSignInButton from "./EntraSignInButton.jsx";
 import useAuth from "./useAuth.js";
-import { fetchAuthProviders } from "./auth.service.js";
+import useAuthProviders from "./useAuthProviders.js";
 
 const initialValues = {
   identifier: "",
@@ -43,40 +40,10 @@ export default function LoginPage() {
     () => searchParams.get("ssoError") ?? "",
   );
 
-  /*
-   * Whether this deployment has Entra configured at all. Until the
-   * answer arrives the button is not drawn, so it never flashes up on a
-   * deployment that runs on passwords only.
-   */
-  const [entraProvider, setEntraProvider] =
-    useState(null);
-
-  useEffect(() => {
-    let isCurrent = true;
-
-    fetchAuthProviders()
-      .then((result) => {
-        if (isCurrent) {
-          setEntraProvider(
-            result?.providers?.entra ?? null,
-          );
-        }
-      })
-      .catch(() => {
-        /*
-         * The password form is the failsafe and must stay usable even
-         * when this lookup fails, so a failure here is silent: it only
-         * means the single sign-on button is not offered.
-         */
-        if (isCurrent) {
-          setEntraProvider(null);
-        }
-      });
-
-    return () => {
-      isCurrent = false;
-    };
-  }, []);
+  const {
+    entraProvider,
+    signupEnabled,
+  } = useAuthProviders();
 
   function handleChange(event) {
   const fieldName = event.target.name;
@@ -199,12 +166,14 @@ export default function LoginPage() {
         />
       )}
 
-      <p className="auth-switch-message">
-        Do not have an account?{" "}
-        <Link to="/sign-up">
-          Sign up
-        </Link>
-      </p>
+      {signupEnabled && (
+        <p className="auth-switch-message">
+          Do not have an account?{" "}
+          <Link to="/sign-up">
+            Sign up
+          </Link>
+        </p>
+      )}
     </AuthLayout>
   );
 }

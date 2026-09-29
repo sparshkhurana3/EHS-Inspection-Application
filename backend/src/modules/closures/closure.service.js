@@ -8,6 +8,10 @@ import {
 import AppError
   from "../../shared/errors/AppError.js";
 
+import {
+  isSharePointReference,
+} from "../../shared/storage/storedFiles.js";
+
 import * as closureRepository
   from "./closure.repository.js";
 
@@ -968,8 +972,15 @@ export async function addClosureItemEvidence({
     );
   }
 
+  let evidence;
+
+  /*
+   * Only a failed write removes the files. Once the rows have
+   * committed they own the files, so a failure while re-reading the
+   * closure below must not delete what the rows now point at.
+   */
   try {
-    const evidence =
+    evidence =
       await withTransaction(
         async (client) => {
           await findEditableClosureItem({
@@ -1010,10 +1021,20 @@ export async function addClosureItemEvidence({
                   {
                     closureItemId,
 
-                    filePath: path.relative(
-                      process.cwd(),
-                      file.path,
-                    ),
+                    /*
+                     * A SharePoint reference is stored as it is; a
+                     * file on the volume, relative to the backend's
+                     * working directory as it always has been.
+                     */
+                    filePath:
+                      isSharePointReference(
+                        file.path,
+                      )
+                        ? file.path
+                        : path.relative(
+                            process.cwd(),
+                            file.path,
+                          ),
 
                     originalName:
                       file.originalname,
@@ -1031,25 +1052,25 @@ export async function addClosureItemEvidence({
           );
         },
       );
-
-    const refreshed = await getClosureById({
-      userId,
-      closureId,
-    });
-
-    return {
-      message:
-        evidence.length === 1
-          ? "Evidence photograph attached."
-          : "Evidence photographs attached.",
-
-      closure: refreshed.closure,
-    };
   } catch (error) {
     await removeUploadedFiles(uploaded);
 
     throw error;
   }
+
+  const refreshed = await getClosureById({
+    userId,
+    closureId,
+  });
+
+  return {
+    message:
+      evidence.length === 1
+        ? "Evidence photograph attached."
+        : "Evidence photographs attached.",
+
+    closure: refreshed.closure,
+  };
 }
 
 /**
@@ -1168,6 +1189,29 @@ export async function getClosureItemEvidenceFile({
     );
   }
 
+  const originalName =
+    evidence.originalName ??
+    "closure-evidence";
+
+  const mimeType =
+    evidence.mimeType ??
+    "application/octet-stream";
+
+  if (
+    isSharePointReference(evidence.filePath)
+  ) {
+    return {
+      sharePointReference:
+        evidence.filePath,
+      originalName,
+      mimeType,
+      missingMessage:
+        "The evidence photograph file is unavailable.",
+      missingCode:
+        "EVIDENCE_FILE_NOT_FOUND",
+    };
+  }
+
   const absolutePath = path.resolve(
     process.cwd(),
     evidence.filePath,
@@ -1201,13 +1245,7 @@ export async function getClosureItemEvidenceFile({
 
   return {
     absolutePath,
-
-    originalName:
-      evidence.originalName ??
-      "closure-evidence",
-
-    mimeType:
-      evidence.mimeType ??
-      "application/octet-stream",
+    originalName,
+    mimeType,
   };
 }

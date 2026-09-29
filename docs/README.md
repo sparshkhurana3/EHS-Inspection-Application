@@ -1,6 +1,6 @@
 # EHS Inspection App — Knowledge base
 
-Reference documentation for humans and for Claude Code sessions. `CLAUDE.md` at the repo root is the short operational summary; these files hold the detail.
+Reference documentation for humans and for Claude Code sessions. `CLAUDE.md` at the repo root is the short operational summary; these files hold the detail. **Deploying the app?** Start with [`SETUP-GUIDE.md`](../SETUP-GUIDE.md) at the repo root (on-premises, HTTPS, Entra ID, Intune, SharePoint); [`guide.md`](../guide.md) is its Entra chapter.
 
 | # | Document | Read it when |
 |---|---|---|

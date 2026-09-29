@@ -1,12 +1,19 @@
 import crypto from "node:crypto";
 import path from "node:path";
-import { unlink } from "node:fs/promises";
 
 import multer from "multer";
 
 import {
-  logger,
-} from "../../config/logger.js";
+  compressUploadedImages,
+} from "../../middleware/compressUploadedImages.js";
+
+import {
+  storeUploadedFiles,
+} from "../../middleware/storeUploadedFiles.js";
+
+import {
+  removeStoredFiles,
+} from "../../shared/storage/storedFiles.js";
 
 import AppError from "../../shared/errors/AppError.js";
 
@@ -98,36 +105,35 @@ export const uploadClosureEvidence =
     MAX_EVIDENCE_FILES,
   );
 
+/*
+ * The 10 MB limit above applies to what the phone sends; what is stored
+ * is the compressed copy this produces.
+ */
+export const compressClosureEvidence =
+  compressUploadedImages({
+    errorCode: "UNREADABLE_EVIDENCE_IMAGE",
+    errorMessage:
+      "An evidence photograph could not be read as an image. Take or attach it again.",
+  });
+
+/* Moves them into SharePoint when PHOTO_STORAGE=sharepoint. */
+export const storeClosureEvidence =
+  storeUploadedFiles({
+    folder: "Closure evidence",
+  });
+
 /**
- * Removes files multer already wrote when the write that was meant to
- * record them did not happen. Never throws: the request has already
- * failed (or succeeded) on its own terms and a leftover file is a
- * smaller problem than masking that outcome.
+ * Removes files that were stored for a write that did not happen, or
+ * whose row has just been deleted. Accepts multer records or stored
+ * references, on the uploads volume or in SharePoint. Never throws: the
+ * request has already failed (or succeeded) on its own terms and a
+ * leftover file is a smaller problem than masking that outcome.
  */
 export async function removeUploadedFiles(files) {
-  await Promise.all(
-    (files ?? []).map(async (file) => {
-      const filePath =
-        file?.path ?? file;
-
-      if (!filePath) {
-        return;
-      }
-
-      try {
-        await unlink(filePath);
-      } catch (error) {
-        if (error.code !== "ENOENT") {
-          logger.warn(
-            "Could not remove a closure evidence file.",
-            {
-              filePath,
-              reason: error.message,
-            },
-          );
-        }
-      }
-    }),
+  await removeStoredFiles(
+    (files ?? []).map(
+      (file) => file?.path ?? file,
+    ),
   );
 }
 

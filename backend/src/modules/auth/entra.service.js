@@ -79,6 +79,13 @@ export function describeProviders() {
     providers: {
       local: {
         enabled: true,
+
+        /*
+         * Lets the pages hide their "Sign up" links rather than offer a
+         * form the API will refuse.
+         */
+        signupEnabled:
+          environment.selfSignupEnabled,
       },
 
       entra: {

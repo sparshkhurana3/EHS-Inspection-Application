@@ -14,4 +14,5 @@ RUN npm run build
 FROM nginx:stable-alpine
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/dist /usr/share/nginx/html
-EXPOSE 80
+# HTTPS only; the certificate is mounted at /etc/nginx/certs at run time.
+EXPOSE 443
