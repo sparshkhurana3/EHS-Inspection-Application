@@ -150,3 +150,71 @@ export const updatePatrolAssignmentValidationRules = [
       return true;
     }),
 ];
+
+/*
+ * The dashboard's zone edit. fromDate is only checked for shape here:
+ * the service rejects an impossible day such as 2026-02-30 and clamps a
+ * past one to the current week, which needs today's date.
+ */
+export const updateZoneAssignmentValidationRules = [
+  param("zoneId")
+    .isInt({ min: 1 })
+    .withMessage(
+      "Zone ID must be a positive integer.",
+    )
+    .toInt(),
+
+  body("auditorId")
+    .exists({
+      checkNull: true,
+      checkFalsy: true,
+    })
+    .withMessage("Auditor is required.")
+    .bail()
+    .isInt({ min: 1 })
+    .withMessage(
+      "Auditor must be a positive integer.",
+    )
+    .toInt(),
+
+  body("auditeeId")
+    .exists({
+      checkNull: true,
+      checkFalsy: true,
+    })
+    .withMessage("Auditee is required.")
+    .bail()
+    .isInt({ min: 1 })
+    .withMessage(
+      "Auditee must be a positive integer.",
+    )
+    .toInt(),
+
+  body("fromDate")
+    .exists({
+      checkNull: true,
+      checkFalsy: true,
+    })
+    .withMessage(
+      "The date to apply the change from is required.",
+    )
+    .bail()
+    .matches(/^\d{4}-\d{2}-\d{2}$/)
+    .withMessage(
+      "The date to apply the change from must be in YYYY-MM-DD format.",
+    ),
+
+  body()
+    .custom((value) => {
+      if (
+        Number(value?.auditorId) ===
+        Number(value?.auditeeId)
+      ) {
+        throw new Error(
+          "The auditor and auditee must be different users.",
+        );
+      }
+
+      return true;
+    }),
+];

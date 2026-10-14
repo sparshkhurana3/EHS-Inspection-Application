@@ -103,13 +103,21 @@ export async function findAssignedMonthlyPatrols(
           ELSE FALSE
         END AS auditor_action_completed,
 
+        /*
+         * The closure row is created with the observation report, so
+         * its mere existence says nothing about the auditee. Their part
+         * is done once they have submitted it for approval.
+         */
         CASE
           WHEN EXISTS (
               SELECT 1
               FROM closure_requests closure_request
               WHERE
                   closure_request.patrol_id = p.id
-                  AND closure_request.requested_by = $1
+                  AND closure_request.status IN (
+                      'SUBMITTED_FOR_CLOSURE',
+                      'APPROVED'
+                  )
           )
           THEN TRUE
           ELSE FALSE
@@ -213,13 +221,21 @@ export async function findUserCurrentWeekPatrols(
           ELSE FALSE
         END AS auditor_action_completed,
 
+        /*
+         * The closure row is created with the observation report, so
+         * its mere existence says nothing about the auditee. Their part
+         * is done once they have submitted it for approval.
+         */
         CASE
           WHEN EXISTS (
               SELECT 1
               FROM closure_requests closure_request
               WHERE
                   closure_request.patrol_id = p.id
-                  AND closure_request.requested_by = $1
+                  AND closure_request.status IN (
+                      'SUBMITTED_FOR_CLOSURE',
+                      'APPROVED'
+                  )
           )
           THEN TRUE
           ELSE FALSE
@@ -268,6 +284,7 @@ export async function findUserCurrentWeekPatrols(
 
 export async function findManagementMonthlyPatrols(
   {
+    userId,
     monthStart,
     monthEnd,
   },
@@ -288,6 +305,20 @@ export async function findManagementMonthlyPatrols(
         auditor.full_name AS auditor_name,
         p.auditee_id,
         auditee.full_name AS auditee_name,
+
+        /*
+         * A manager may also be rostered on a patrol, so the calendar
+         * marks their own audits the way it does anyone else's.
+         */
+        CASE
+          WHEN p.auditor_id = $1
+          THEN 'AUDITOR'
+
+          WHEN p.auditee_id = $1
+          THEN 'AUDITEE'
+
+          ELSE NULL
+        END AS assignment_role,
 
         observation_report.id
           AS observation_report_id,
@@ -341,8 +372,8 @@ export async function findManagementMonthlyPatrols(
         ON observation_report.patrol_id = p.id
 
       WHERE
-        p.scheduled_date >= $1::DATE
-        AND p.scheduled_date < $2::DATE
+        p.scheduled_date >= $2::DATE
+        AND p.scheduled_date < $3::DATE
         AND p.status <> 'CANCELLED'
 
       ORDER BY
@@ -351,6 +382,7 @@ export async function findManagementMonthlyPatrols(
         p.id ASC
     `,
     [
+      userId,
       monthStart,
       monthEnd,
     ],
@@ -711,53 +743,32 @@ export async function findOfficerPlant(
 }
 
 /**
- * One row per zone-patrol scheduled in the plant's single upcoming
- * inspection week: the nearest week, on or after `weekStart`, that has
- * at least one non-cancelled patrol anywhere in the plant. Empty
- * (`[]`) when nothing is scheduled from `weekStart` onward.
+ * One row per zone-patrol scheduled at the plant in exactly the week
+ * from `weekStart` (its Monday) to `weekEnd` (its Sunday), both
+ * inclusive. Empty (`[]`) when that week has nothing scheduled; the
+ * service still builds a card for it, so the officer can step on to
+ * another week from there.
  */
-export async function findOfficerWeekPatrols(
+export async function findOfficerPatrolsInWeek(
   {
     plantId,
     weekStart,
+    weekEnd,
   },
   client = databasePool,
 ) {
   const result = await client.query(
     `
-      WITH plant_next_date AS (
-        SELECT MIN(p.scheduled_date) AS next_date
-        FROM patrols p
-        JOIN units u
-          ON u.id = p.unit_id
-        WHERE
-          u.plant_id = $1
-          AND p.status <> 'CANCELLED'
-          AND p.scheduled_date >= $2::DATE
-      ),
-
-      week_bounds AS (
-        SELECT
-          DATE_TRUNC('week', next_date)::DATE
-            AS week_start,
-          (
-            DATE_TRUNC('week', next_date)
-            + INTERVAL '6 day'
-          )::DATE AS week_end
-        FROM plant_next_date
-        WHERE next_date IS NOT NULL
-      )
-
       SELECT
         u.id AS unit_id,
         u.name AS unit_name,
         u.unit_number,
 
-        week_bounds.week_start,
-        week_bounds.week_end,
-
         p.id AS patrol_id,
-        p.scheduled_date,
+        TO_CHAR(
+          p.scheduled_date,
+          'YYYY-MM-DD'
+        ) AS scheduled_date,
         p.status AS patrol_status,
 
         z.id AS zone_id,
@@ -778,18 +789,10 @@ export async function findOfficerWeekPatrols(
         closure_request.id AS closure_id,
         closure_request.status AS closure_status
 
-      FROM week_bounds
-
-      JOIN patrols p
-        ON p.status <> 'CANCELLED'
-        AND p.scheduled_date >=
-            week_bounds.week_start
-        AND p.scheduled_date <=
-            week_bounds.week_end
+      FROM patrols p
 
       JOIN units u
         ON u.id = p.unit_id
-        AND u.plant_id = $1
 
       JOIN zones z
         ON z.id = p.zone_id
@@ -808,22 +811,29 @@ export async function findOfficerWeekPatrols(
         AS closure_request
         ON closure_request.patrol_id = p.id
 
+      WHERE
+        u.plant_id = $1
+        AND p.status <> 'CANCELLED'
+        AND p.scheduled_date >= $2::DATE
+        AND p.scheduled_date <= $3::DATE
+
       ORDER BY
         u.unit_number ASC,
         u.name ASC,
         z.name ASC,
         p.scheduled_date ASC
     `,
-    [plantId, weekStart],
+    [
+      plantId,
+      weekStart,
+      weekEnd,
+    ],
   );
 
   return result.rows.map((row) => ({
     unitId: row.unit_id,
     unitName: row.unit_name,
     unitNumber: row.unit_number,
-
-    weekStart: row.week_start,
-    weekEnd: row.week_end,
 
     patrolId: row.patrol_id,
     scheduledDate: row.scheduled_date,
@@ -848,4 +858,185 @@ export async function findOfficerWeekPatrols(
     closureId: row.closure_id,
     closureStatus: row.closure_status,
   }));
+}
+
+/**
+ * The Monday ("YYYY-MM-DD") of the plant's first week, from the week
+ * starting `currentWeekStart` onward, that has at least one
+ * non-cancelled patrol. Null when nothing is scheduled from the current
+ * week on.
+ */
+export async function findOfficerDefaultWeekStart(
+  {
+    plantId,
+    currentWeekStart,
+  },
+  client = databasePool,
+) {
+  const result = await client.query(
+    `
+      SELECT
+        TO_CHAR(
+          DATE_TRUNC(
+            'week',
+            MIN(p.scheduled_date)
+          ),
+          'YYYY-MM-DD'
+        ) AS week_start
+
+      FROM patrols p
+
+      JOIN units u
+        ON u.id = p.unit_id
+
+      WHERE
+        u.plant_id = $1
+        AND p.status <> 'CANCELLED'
+        AND p.scheduled_date >= $2::DATE
+    `,
+    [
+      plantId,
+      currentWeekStart,
+    ],
+  );
+
+  return result.rows[0]?.week_start ?? null;
+}
+
+/**
+ * The nearest earlier and later weeks that have at least one
+ * non-cancelled patrol at the plant, each as its Monday ("YYYY-MM-DD"),
+ * or null at either end. This is what lets the week card step over
+ * empty weeks without the client doing any date arithmetic.
+ */
+export async function findOfficerAdjacentWeeks(
+  {
+    plantId,
+    weekStart,
+    weekEnd,
+  },
+  client = databasePool,
+) {
+  const result = await client.query(
+    `
+      SELECT
+        TO_CHAR(
+          DATE_TRUNC(
+            'week',
+            MAX(p.scheduled_date) FILTER (
+              WHERE p.scheduled_date < $2::DATE
+            )
+          ),
+          'YYYY-MM-DD'
+        ) AS previous_week_start,
+
+        TO_CHAR(
+          DATE_TRUNC(
+            'week',
+            MIN(p.scheduled_date) FILTER (
+              WHERE p.scheduled_date > $3::DATE
+            )
+          ),
+          'YYYY-MM-DD'
+        ) AS next_week_start
+
+      FROM patrols p
+
+      JOIN units u
+        ON u.id = p.unit_id
+
+      WHERE
+        u.plant_id = $1
+        AND p.status <> 'CANCELLED'
+    `,
+    [
+      plantId,
+      weekStart,
+      weekEnd,
+    ],
+  );
+
+  const row = result.rows[0] ?? {};
+
+  return {
+    previousWeekStart:
+      row.previous_week_start ?? null,
+    nextWeekStart:
+      row.next_week_start ?? null,
+  };
+}
+
+/**
+ * How many of each zone's audits from `fromDate` to `toDate` (both
+ * inclusive) a zone-level reassignment would reach: those still
+ * SCHEDULED with no observation report. The same rule the patrols
+ * module applies when it reassigns, so the count the card offers is the
+ * count that changes. A Map of zone id (as a string) to count; a zone
+ * with nothing reassignable is absent from it.
+ *
+ * No plant filter is needed: the zone ids come from the plant's own
+ * week, and a zone belongs to exactly one plant. The zone, its unit and
+ * its plant must still be active, because the reassignment endpoint
+ * (findZoneWithHierarchy) refuses an inactive zone with a 404; counting
+ * its audits here would offer an edit that cannot be saved.
+ */
+export async function countReassignableZonePatrols(
+  {
+    zoneIds,
+    fromDate,
+    toDate,
+  },
+  client = databasePool,
+) {
+  if (zoneIds.length === 0) {
+    return new Map();
+  }
+
+  const result = await client.query(
+    `
+      SELECT
+        p.zone_id,
+        COUNT(*)::INTEGER AS reassignable_count
+
+      FROM patrols p
+
+      JOIN zones z
+        ON z.id = p.zone_id
+        AND z.is_active = TRUE
+
+      JOIN units u
+        ON u.id = z.unit_id
+        AND u.is_active = TRUE
+
+      JOIN plants plant
+        ON plant.id = u.plant_id
+        AND plant.is_active = TRUE
+
+      WHERE
+        p.zone_id = ANY($1::BIGINT[])
+        AND p.status = 'SCHEDULED'
+        AND p.scheduled_date >= $2::DATE
+        AND p.scheduled_date <= $3::DATE
+        AND NOT EXISTS (
+          SELECT 1
+          FROM observation_reports
+            AS observation_report
+          WHERE observation_report.patrol_id = p.id
+        )
+
+      GROUP BY p.zone_id
+    `,
+    [
+      zoneIds,
+      fromDate,
+      toDate,
+    ],
+  );
+
+  return new Map(
+    result.rows.map((row) => [
+      String(row.zone_id),
+      row.reassignable_count,
+    ]),
+  );
 }

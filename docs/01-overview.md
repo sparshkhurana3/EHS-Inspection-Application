@@ -4,11 +4,11 @@
 
 An internal Environmental, Health & Safety (EHS) inspection tool for a multi-plant manufacturing company (plants: Gurugram, Manesar, Pune, Chennai, China). It replaces a paper/Excel "patrol" process:
 
-1. An **EHS Officer** plans weekly safety **patrols**: for a given plant → unit → zone → area, on a date, with an **auditor** (the person who walks the floor) and an **auditee** (the person responsible for the area).
+1. An **EHS Officer** plans weekly safety **patrols**: for a given plant → unit → zone → area, on a date, with an **auditor** (the person who walks the floor) and an **auditee** (the person responsible for the area). In practice a roster file uploaded once schedules every zone for every Monday to 31 December, and the officer changes a zone's people from the dashboard as the year goes on. The officer may be an auditor or auditee too.
 2. The auditor performs the patrol and files one **observation report** per patrol: a photograph, a description, a category (Unsafe Act `UA` / Unsafe Condition `UC`), and a risk level (`HIGH`/`MEDIUM`/`LOW`).
-3. Filing the report automatically opens a **closure request** for the auditee, who records an action plan (responsible HOD, target date) and later submits it for closure with a completion date.
-4. The EHS Officer reviews the submitted closure and approves it, rejects it, or asks for re-examination. *(Backend for this step is not implemented yet; see [09-feature-refinement-backlog.md](09-feature-refinement-backlog.md).)*
-5. Everyone sees a **dashboard**: their own current-week task (auditor or auditee), the month's patrols on a calendar, and annual metrics. Management roles see the plant-wide view.
+3. Filing the report automatically opens a **closure request** for the auditee, who records an action plan and target date for each observation, optionally with evidence photographs, and submits it for approval.
+4. The EHS Officer reviews the submitted closure and approves it, which completes the patrol, or sends it back for re-examination. They may approve one on which they are themselves the auditee.
+5. Everyone sees a **dashboard**: their own current-week task (auditor or auditee), the month's patrols on a calendar, and annual metrics. Management roles see the plant-wide view, and the EHS Officer a week card they can page through and edit.
 
 ## Actors and roles
 
@@ -17,12 +17,12 @@ Role codes live in `backend/src/shared/constants/roles.js` and the `roles` table
 | Role code | Who | What they can do today |
 |---|---|---|
 | `USER` | Every signed-up account | Dashboard, file observation reports for patrols where they are the auditor, work closures where they are the auditee |
-| `EHS_OFFICER` | Safety officer | Everything `USER` can, plus `/plan` (schedule patrols). Login redirects to `/ehs-officer` → `/dashboard`. Intended approver of closures |
+| `EHS_OFFICER` | Safety officer | `/plan` (roster upload, single audits, inspection report), the dashboard week card (page between weeks, change a zone's auditor and auditee), and the closure approval queue. May also be rostered as auditor or auditee like anyone at their plant, and may approve a closure on which they are the auditee (a warning is shown; [20](20-dashboard-assignment-editing-plan.md)). Login redirects to `/ehs-officer` → `/dashboard` |
 | `HOD` | Head of Department | `USER` plus management dashboard view |
 | `PLANT_HEAD` | Plant head | `USER` plus management dashboard view |
 | `ADMIN` | Reserved | Treated like `EHS_OFFICER` for login redirect only; no admin screens exist |
 
-"Auditor" and "auditee" are **not roles**. They are per-patrol assignments (`patrols.auditor_id`, `patrols.auditee_id`). The seed scripts insert `AUDITOR`/`AUDITEE` rows into `roles` for test convenience, but no code checks them.
+"Auditor" and "auditee" are **not roles**. They are per-patrol assignments (`patrols.auditor_id`, `patrols.auditee_id`) open to any active user at the plant, the EHS Officer included; the only person rule is that one patrol's auditor and auditee differ. The seed scripts insert `AUDITOR`/`AUDITEE` rows into `roles` for test convenience, but no code checks them.
 
 ## Location hierarchy
 
@@ -68,7 +68,7 @@ Mirrors the numbering used in the sibling project's architecture doc so the two 
 | R6 | Close an observation report | Done, including the EHS approval and re-examination loop | `closures` module, `ClosurePage` |
 | R7 | Alerts for overdue open observations | Not started | — |
 | R8 | Monthly calendar of planned audits | Done (read-only) | `GET /api/dashboard?year&month`, `PatrolCalendar` |
-| R9 | Edit an assigned audit | Not started (no `PATCH /api/patrols/:id`) | — |
+| R9 | Edit an assigned audit | Partly done: **reassignment is done** — a zone's auditor and auditee for the rest of the year, or one audit's, from the dashboard week card. Changing an audit's date, and cancelling one, are not started | `PATCH /api/patrols/zones/:zoneId/assignment`, `PATCH /api/patrols/:patrolId/assignment`, `OfficerWeekCard`; [20](20-dashboard-assignment-editing-plan.md) |
 | R10 | Containerised frontend + backend + DB via compose | Done | [08-containerization-plan.md](08-containerization-plan.md) |
 | R11 | Location → Unit → Zone → Area division, areas fixed per zone | Done | [Location hierarchy](#location-hierarchy) |
 | R12 | All four levels read from the database, values loaded at production | Done, no hardcoded master data remains | [Location hierarchy](#location-hierarchy) |

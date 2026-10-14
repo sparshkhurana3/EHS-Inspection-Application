@@ -62,6 +62,28 @@ export async function updatePatrolAssignment(
   }
 }
 
+export async function updateZoneAssignment(
+  req,
+  res,
+  next,
+) {
+  try {
+    const result =
+      await patrolService
+        .updateZoneAssignment({
+          userId: req.user.id,
+          zoneId: req.params.zoneId,
+          auditorId: req.body.auditorId,
+          auditeeId: req.body.auditeeId,
+          fromDate: req.body.fromDate,
+        });
+
+    res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function getRoster(
   req,
   res,

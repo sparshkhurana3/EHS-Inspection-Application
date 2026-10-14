@@ -20,12 +20,14 @@ import {
   getPlanningLookups,
   getRoster,
   updatePatrolAssignment,
+  updateZoneAssignment,
   uploadRoster,
 } from "./patrol.controller.js";
 
 import {
   createPatrolValidationRules,
   updatePatrolAssignmentValidationRules,
+  updateZoneAssignmentValidationRules,
 } from "./patrol.validator.js";
 
 import {
@@ -118,6 +120,22 @@ router.patch(
   updatePatrolAssignmentValidationRules,
   validate,
   updatePatrolAssignment,
+);
+
+/*
+ * Reassigns every audit of a zone that is still SCHEDULED with no
+ * observation report, from a given date to 31 December, and the zone's
+ * roster row with them. Three segments, so it never collides with
+ * /:patrolId/assignment. Scope to the officer's own location is
+ * enforced in the service.
+ */
+router.patch(
+  "/zones/:zoneId/assignment",
+  authenticate,
+  authorize(...PLANNING_ROLES),
+  updateZoneAssignmentValidationRules,
+  validate,
+  updateZoneAssignment,
 );
 
 export default router;

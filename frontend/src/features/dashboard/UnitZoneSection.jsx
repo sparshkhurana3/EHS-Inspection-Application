@@ -1,12 +1,13 @@
 import ZoneAssignmentRow from "./ZoneAssignmentRow.jsx";
 
 /**
- * One unit's zones within the officer's single upcoming inspection
- * week card.
+ * One unit's zones within the officer's inspection week card.
  */
 export default function UnitZoneSection({
   unit,
   users,
+  zoneEditFromDate,
+  zoneEditToDate,
   onSaveAssignment,
 }) {
   return (
@@ -42,6 +43,12 @@ export default function UnitZoneSection({
             key={zone.patrolId}
             zone={zone}
             users={users}
+            zoneEditFromDate={
+              zoneEditFromDate
+            }
+            zoneEditToDate={
+              zoneEditToDate
+            }
             onSaveAssignment={
               onSaveAssignment
             }

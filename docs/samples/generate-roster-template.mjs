@@ -49,7 +49,7 @@ const INSTRUCTIONS = [
   ],
   [
     "3.",
-    "Both people must be registered, active users at the same location. The email has to match their account exactly.",
+    "Both people must be registered, active users at the same location. The EHS Officer may enter their own email, as an auditor or an auditee. The email has to match their account exactly.",
   ],
   [
     "4.",
@@ -79,7 +79,7 @@ const INSTRUCTIONS = [
   ],
   [
     "",
-    "Afterwards you can still change the auditor or auditee for a zone from the dashboard, and the change applies to every remaining Monday of the year.",
+    "Afterwards you can change a zone's auditor or auditee from the dashboard, for every remaining audit of the year or for a single week. Uploading the roster again overwrites those changes with what the file says.",
   ],
 ];
 

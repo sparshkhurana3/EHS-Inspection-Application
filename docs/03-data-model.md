@@ -75,8 +75,9 @@ Migration 007 also drops the three value CHECK constraints, so a location or are
 |---|---|
 | `unit_id`, `zone_id` | FK, `RESTRICT` |
 | `auditor_id`, `auditee_id` | FK users; CHECK `auditor_id <> auditee_id` |
-| `ehs_officer_id` | FK users, nullable; the officer who planned it |
+| `ehs_officer_id` | FK users, nullable; the officer who planned it. **May equal `auditor_id` or `auditee_id`**: the officer can be rostered on their own patrols, and nothing in the schema ties the three together ([20](20-dashboard-assignment-editing-plan.md) D8). Do not add an `ehs_officer_id <> auditee_id` constraint; approving one's own closure is allowed by decision (D9) |
 | `created_by` | FK users, nullable |
+| `roster_id` | FK `zone_audit_rosters`, nullable, `ON DELETE SET NULL` (migration 012); the roster row that generated it, `NULL` for an audit planned by hand |
 | `scheduled_date` | `DATE` |
 | `plant_location` | text, CHECK in (Gurugram, Manesar, Chennai, Pune, China), nullable for legacy rows |
 | `area_detail` | text, CHECK in the nine shop-floor areas, nullable |
@@ -84,6 +85,10 @@ Migration 007 also drops the three value CHECK constraints, so a location or are
 | `created_at`, `updated_at` | |
 
 Indexes on `scheduled_date`, `(auditor_id, scheduled_date)`, `(auditee_id, scheduled_date)`, `(ehs_officer_id, scheduled_date)`, `(zone_id, scheduled_date)`, `(status, scheduled_date)`. Several are duplicated under two names because migrations 002 and 005 both created them.
+
+`auditor_id` and `auditee_id` change after creation only through reassignment, and only while the patrol is `SCHEDULED` ([05](05-workflows.md#reassigning-auditors-and-auditees)).
+
+**`zone_audit_rosters`** (migration 012, [14](14-weekly-roster-plan.md)) — one row per zone (`UNIQUE (zone_id)`): `plant_id`, `unit_id`, `zone_id`, `auditor_id`, `auditee_id` (CHECK `zone_audit_rosters_people_differ`), `effective_from`/`effective_to` (the first Monday and 31 December of the upload that last set the row), `uploaded_by`, `source_file_name`. A roster upload replaces the rows and regenerates upcoming patrols from them. A dashboard zone edit rewrites the row's auditor and auditee, but only when its effective range overlaps the range being reassigned, and leaves the dates alone ([20](20-dashboard-assignment-editing-plan.md) D4).
 
 **`observation_reports`** — one row per patrol (`patrol_id` is `UNIQUE`, `ON DELETE CASCADE`).
 

@@ -1,14 +1,28 @@
+import {
+  useAuthenticatedUser,
+} from "../../app/authProvider.jsx";
+
 function todayValue() {
   return new Date().toISOString().slice(0, 10);
 }
 
-function userLabel(user) {
+/*
+ * The officer is in the user list and may audit, or be audited, like
+ * anyone else, so their own entry is marked to be easy to find.
+ */
+function userLabel(user, signedInUserId) {
   const name =
     user.fullName ?? user.username ?? `User ${user.id}`;
 
-  return user.fullName && user.username
-    ? `${user.fullName} (${user.username})`
-    : name;
+  const label =
+    user.fullName && user.username
+      ? `${user.fullName} (${user.username})`
+      : name;
+
+  return String(user.id) ===
+    String(signedInUserId)
+    ? `${label} (you)`
+    : label;
 }
 
 /**
@@ -28,6 +42,9 @@ export default function PatrolForm({
   onSubmit,
   onCancel,
 }) {
+  const { user: signedInUser } =
+    useAuthenticatedUser();
+
   const areas = selectedZone?.areas ?? [];
 
   const auditeeOptions = users.filter(
@@ -205,8 +222,8 @@ export default function PatrolForm({
 
           {users.length === 0 ? (
             <p className="closure-empty-note">
-              No other users are registered at
-              this location.
+              No users are registered at this
+              location.
             </p>
           ) : (
             <select
@@ -229,7 +246,10 @@ export default function PatrolForm({
                   key={user.id}
                   value={user.id}
                 >
-                  {userLabel(user)}
+                  {userLabel(
+                    user,
+                    signedInUser?.id,
+                  )}
                 </option>
               ))}
             </select>
@@ -265,7 +285,10 @@ export default function PatrolForm({
                 key={user.id}
                 value={user.id}
               >
-                {userLabel(user)}
+                {userLabel(
+                  user,
+                  signedInUser?.id,
+                )}
               </option>
             ))}
           </select>

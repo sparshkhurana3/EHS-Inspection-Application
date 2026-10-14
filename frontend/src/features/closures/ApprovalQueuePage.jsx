@@ -3,6 +3,10 @@ import { useState } from "react";
 import Alert from "../../components/Alert.jsx";
 import LoadingSpinner from "../../components/LoadingSpinner.jsx";
 
+import {
+  useAuthenticatedUser,
+} from "../../app/authProvider.jsx";
+
 import ApprovalPanel from "./ApprovalPanel.jsx";
 import ObservationSummary from "./ObservationSummary.jsx";
 
@@ -19,6 +23,8 @@ import {
  * The EHS Officer's review queue: everything submitted and waiting.
  */
 export default function ApprovalQueuePage() {
+  const { user } = useAuthenticatedUser();
+
   const {
     closures,
     loading,
@@ -30,6 +36,18 @@ export default function ApprovalQueuePage() {
 
   const [selectedId, setSelectedId] =
     useState(null);
+
+  /*
+   * The officer may be the auditee of a closure in their own queue.
+   * Marking the row says so before it is opened.
+   */
+  function auditeeLabel(closure) {
+    return closure.auditeeId != null &&
+      String(closure.auditeeId) ===
+        String(user?.id)
+      ? `${closure.auditeeName} (you)`
+      : closure.auditeeName;
+  }
 
   const selected =
     closures.find(
@@ -106,7 +124,7 @@ export default function ApprovalQueuePage() {
                   </strong>
 
                   <span>
-                    {closure.auditeeName} ·{" "}
+                    {auditeeLabel(closure)} ·{" "}
                     {[
                       closure.unitName,
                       closure.zoneName,

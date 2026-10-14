@@ -18,3 +18,24 @@ export function fetchDashboardData({
     },
   );
 }
+
+/**
+ * One week of the EHS Officer's plant. Without a weekStart the API
+ * picks the default week, the same one GET /dashboard returns.
+ */
+export function fetchOfficerWeek({
+  weekStart,
+} = {}) {
+  const query = weekStart
+    ? `?${new URLSearchParams({
+        weekStart,
+      }).toString()}`
+    : "";
+
+  return apiRequest(
+    `/dashboard/officer-week${query}`,
+    {
+      method: "GET",
+    },
+  );
+}

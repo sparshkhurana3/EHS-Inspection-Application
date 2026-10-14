@@ -19,6 +19,7 @@ import DashboardMetrics from "./DashboardMetrics.jsx";
 import OfficerWeekCard from "./OfficerWeekCard.jsx";
 import WeeklySummary from "./WeeklySummary.jsx";
 import useDashboard from "./useDashboard.js";
+import useOfficerWeek from "./useOfficerWeek.js";
 
 /**
  * Gets the authenticated user's application roles.
@@ -125,6 +126,14 @@ export default function DashboardPage() {
     reloadDashboard,
   } = useDashboard();
 
+  /*
+   * Called here rather than in OfficerWeekCard: the spinner below
+   * unmounts the card on every dashboard reload, and the week the
+   * officer moved to has to outlive that.
+   */
+  const officerWeekView =
+    useOfficerWeek(officerWeek);
+
   const [
     weeklyPlanExpanded,
     setWeeklyPlanExpanded,
@@ -139,7 +148,9 @@ export default function DashboardPage() {
     getUserRoles(user, role);
 
   const managementUser =
-    hasManagementRole(userRoles);
+    hasManagementRole({
+      roles: userRoles,
+    });
 
   function handleOpenAudit(audit) {
     setNavigationMessage("");
@@ -173,6 +184,17 @@ export default function DashboardPage() {
   function handleReloadDashboard() {
     setNavigationMessage("");
     reloadDashboard();
+
+    /*
+     * The default week is re-seeded by the dashboard reload itself; a
+     * week the officer moved to has to be fetched on its own.
+     */
+    if (
+      officerWeekView.selectedWeekStart !==
+      null
+    ) {
+      officerWeekView.reload();
+    }
   }
 
   if (loading) {
@@ -197,7 +219,7 @@ export default function DashboardPage() {
 
           <p>
             {managementUser
-              ? "Review the monthly patrol calendar and the next upcoming weekly Zone-wise audit plan."
+              ? "Review the monthly patrol calendar and the weekly zone-wise audit plan."
               : "Review audits assigned to you and open your next required inspection action."}
           </p>
         </div>
@@ -247,26 +269,59 @@ export default function DashboardPage() {
       />
 
       {managementUser ? (
-        normalizeRole(role) ===
-        "EHS_OFFICER" ? (
-          <OfficerWeekCard
-            week={officerWeek}
-            onAssignmentChanged={
-              reloadDashboard
-            }
-          />
-        ) : (
-          <WeeklySummary
-            week={nextWeek}
-            expanded={weeklyPlanExpanded}
-            onToggle={() => {
-              setWeeklyPlanExpanded(
-                (currentValue) =>
-                  !currentValue,
-              );
-            }}
-          />
-        )
+        <>
+          {/*
+           * A manager can be rostered too. Their own task is shown only
+           * when they have one, so the plant-wide widget below is not
+           * pushed down by an empty "No upcoming audit found" card.
+           */}
+          {nextAudit ? (
+            <AuditStatusCards
+              audit={nextAudit}
+              onOpen={handleOpenAudit}
+            />
+          ) : null}
+
+          {normalizeRole(role) ===
+          "EHS_OFFICER" ? (
+            <OfficerWeekCard
+              week={officerWeekView.week}
+              loading={
+                officerWeekView.loading
+              }
+              error={officerWeekView.error}
+              successMessage={
+                officerWeekView.successMessage
+              }
+              onSuccessMessageChange={
+                officerWeekView.setSuccessMessage
+              }
+              onPreviousWeek={
+                officerWeekView.goToPreviousWeek
+              }
+              onNextWeek={
+                officerWeekView.goToNextWeek
+              }
+              onCurrentWeek={
+                officerWeekView.goToCurrentWeek
+              }
+              onReload={
+                officerWeekView.reload
+              }
+            />
+          ) : (
+            <WeeklySummary
+              week={nextWeek}
+              expanded={weeklyPlanExpanded}
+              onToggle={() => {
+                setWeeklyPlanExpanded(
+                  (currentValue) =>
+                    !currentValue,
+                );
+              }}
+            />
+          )}
+        </>
       ) : (
         <AuditStatusCards
           audit={nextAudit}

@@ -2291,3 +2291,76 @@ a { color: inherit; }
   border-color: #101828;
   box-shadow: 0 0 0 1px #101828 inset;
 }
+
+/* Officer week card: week navigation and the zone edit's scope choice */
+
+.officer-week-summary {
+  padding: 20px 22px;
+}
+
+.officer-week-nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 22px;
+  border-top: 1px solid #eaecf0;
+  background: #f9fafb;
+}
+
+.officer-week-nav .button {
+  min-height: 34px;
+  padding: 6px 14px;
+  font-size: 0.74rem;
+}
+
+.officer-week-nav-status {
+  margin-left: auto;
+  color: #667085;
+  font-size: 0.74rem;
+}
+
+.officer-week-empty {
+  padding: 22px;
+  border-top: 1px solid #eaecf0;
+  text-align: center;
+}
+
+.officer-week-empty strong {
+  color: #344054;
+}
+
+.officer-week-empty p {
+  margin: 7px 0 0;
+  color: #667085;
+  font-size: 0.83rem;
+}
+
+.zone-assignment-scope-group {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  cursor: default;
+}
+
+.zone-assignment-scope-title {
+  color: #344054;
+  font-weight: 750;
+}
+
+.zone-assignment-scope-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.zone-assignment-scope-option[aria-disabled="true"] {
+  color: #98a2b3;
+  cursor: not-allowed;
+}
+
+.zone-assignment-scope-note {
+  margin: 2px 0 0;
+  color: #93370d;
+}

@@ -7,12 +7,18 @@ import {
 import * as dashboardRepository
   from "./dashboard.repository.js";
 
-const MANAGEMENT_ROLES = new Set([
+/*
+ * The management roles in the order the dashboard picks between them.
+ * A user's roles arrive from an unordered ARRAY_AGG, so taking the
+ * first one they hold could randomly cost an officer who is also an
+ * HOD their week card.
+ */
+const MANAGEMENT_ROLE_PRIORITY = [
   USER_ROLES.EHS_OFFICER,
   USER_ROLES.HOD,
   USER_ROLES.PLANT_HEAD,
   USER_ROLES.ADMIN,
-]);
+];
 
 function normalizeRole(role) {
   return String(role ?? "")
@@ -28,8 +34,8 @@ function getPrimaryDashboardRole(roles) {
     : [];
 
   const managementRole =
-    normalizedRoles.find((role) =>
-      MANAGEMENT_ROLES.has(role),
+    MANAGEMENT_ROLE_PRIORITY.find((role) =>
+      normalizedRoles.includes(role),
     );
 
   if (managementRole) {
@@ -40,7 +46,7 @@ function getPrimaryDashboardRole(roles) {
 }
 
 function isManagementRole(role) {
-  return MANAGEMENT_ROLES.has(
+  return MANAGEMENT_ROLE_PRIORITY.includes(
     normalizeRole(role),
   );
 }
@@ -177,6 +183,97 @@ function getIsoWeekNumber(dateValue) {
     ) /
       7,
   );
+}
+
+function addDaysToDateOnly(
+  dateValue,
+  days,
+) {
+  const date = new Date(
+    `${dateValue}T00:00:00.000Z`,
+  );
+
+  date.setUTCDate(
+    date.getUTCDate() + days,
+  );
+
+  return formatDateOnly(date);
+}
+
+/*
+ * The week the officer asked to see, as its Monday. Parsed here rather
+ * than by a sanitiser because Express 5's req.query is a getter, so a
+ * sanitised value never reaches the controller. Any day is accepted and
+ * moved back to the Monday of its week. Null when no week was asked
+ * for, which means the default week.
+ */
+function parseOfficerWeekStart(
+  weekStartValue,
+) {
+  if (weekStartValue === undefined) {
+    return null;
+  }
+
+  const date =
+    typeof weekStartValue === "string" &&
+    /^\d{4}-\d{2}-\d{2}$/.test(
+      weekStartValue,
+    )
+      ? new Date(
+          `${weekStartValue}T00:00:00.000Z`,
+        )
+      : null;
+
+  /*
+   * The round trip rejects dates such as 2026-02-30, which Date would
+   * otherwise roll over into March.
+   */
+  const isRealDate =
+    date !== null &&
+    !Number.isNaN(date.getTime()) &&
+    formatDateOnly(date) ===
+      weekStartValue;
+
+  if (
+    !isRealDate ||
+    date.getUTCFullYear() < 2020 ||
+    date.getUTCFullYear() > 2100
+  ) {
+    throw new AppError(
+      "The dashboard week is invalid.",
+      400,
+      "INVALID_WEEK_START",
+    );
+  }
+
+  return getCurrentWeekRange(date)
+    .weekStart;
+}
+
+/*
+ * The range a zone-level edit made from this week reaches, which is
+ * the range PATCH /patrols/zones/:zoneId/assignment applies for that
+ * from-date: max(week's Monday, current Monday) to 31 December of that
+ * year. A week that is not past starts on or after the current Monday,
+ * so the max is the week's own Monday. Both null for a past week, which
+ * is read-only.
+ */
+function getZoneEditRange(
+  weekStart,
+  currentWeekStart,
+) {
+  if (weekStart < currentWeekStart) {
+    return {
+      zoneEditFromDate: null,
+      zoneEditToDate: null,
+    };
+  }
+
+  return {
+    zoneEditFromDate: weekStart,
+    zoneEditToDate:
+      `${weekStart.slice(0, 4)}-12-31`,
+  };
 }
 
 function hasPendingUserAction(audit) {
@@ -330,14 +427,30 @@ function getZoneStatusCode({
 }
 
 /**
- * Groups the flat zone rows from findOfficerWeekPatrols into a single
- * card for the plant's next upcoming inspection week, its zones
- * grouped by unit. Null when nothing is scheduled.
+ * Groups the flat zone rows from findOfficerPatrolsInWeek into the
+ * officer's week card, its zones grouped by unit. Always an object,
+ * even for an empty week, because the card needs the week's dates and
+ * its neighbours to move on from there.
+ *
+ * A past week is read-only: its audits are history, or still owed by
+ * whoever was rostered then. In the current and later weeks a zone
+ * offers a one-off swap of this audit while nobody has started on it,
+ * and a zone-level edit while the zone has anything left to reassign
+ * from this week to 31 December.
  */
-function buildOfficerWeek(rows) {
-  if (rows.length === 0) {
-    return null;
-  }
+function buildOfficerWeek({
+  weekStart,
+  weekEnd,
+  currentWeekStart,
+  previousWeekStart,
+  nextWeekStart,
+  zoneEditFromDate,
+  zoneEditToDate,
+  reassignableCounts,
+  rows,
+}) {
+  const isPastWeek =
+    weekStart < currentWeekStart;
 
   const unitsById = new Map();
 
@@ -358,12 +471,18 @@ function buildOfficerWeek(rows) {
       closureStatus: row.closureStatus,
     });
 
+    const reassignableCount =
+      reassignableCounts.get(
+        String(row.zoneId),
+      ) ?? 0;
+
     unitsById.get(row.unitId).zones.push({
       patrolId: row.patrolId,
       zoneId: row.zoneId,
       zoneName: row.zoneName,
       zoneNumber: row.zoneNumber,
       scheduledDate: row.scheduledDate,
+      patrolStatus: row.patrolStatus,
       auditorId: row.auditorId,
       auditorName: row.auditorName,
       auditeeId: row.auditeeId,
@@ -377,20 +496,170 @@ function buildOfficerWeek(rows) {
         ZONE_STATUS_LABELS[statusCode],
 
       /*
-       * Reassigning the auditor/auditee only makes sense before any
-       * work has happened against this audit.
+       * The one-off swap of this audit alone, which only makes sense
+       * before any work has happened against it. The same rule the
+       * patrols module enforces when it saves the swap.
        */
       canEditAssignment:
+        !isPastWeek &&
+        row.patrolStatus === "SCHEDULED" &&
         !row.observationReportId,
+
+      reassignableCount,
+
+      /*
+       * The zone-level edit. Independent of this week's audit, so a
+       * report filed on Monday never blocks changing the zone's future.
+       */
+      canEditZone:
+        !isPastWeek &&
+        reassignableCount > 0,
     });
   }
 
   return {
-    weekStart: rows[0].weekStart,
-    weekEnd: rows[0].weekEnd,
+    weekStart,
+    weekEnd,
+    isoWeek: getIsoWeekNumber(weekStart),
+    isCurrentWeek:
+      weekStart === currentWeekStart,
+    isPastWeek,
+    currentWeekStart,
+    previousWeekStart,
+    nextWeekStart,
+    zoneEditFromDate,
+    zoneEditToDate,
     totalAudits: rows.length,
     units: [...unitsById.values()],
   };
+}
+
+/**
+ * Everything the officer's week card shows for one week of their
+ * plant. `requestedWeekStart` is a Monday, or null for the default
+ * week: the current week if it has inspections, else the next week
+ * that does, else the current week. GET /dashboard and
+ * GET /dashboard/officer-week both come through here, so the two can
+ * never disagree about the default week.
+ */
+async function loadOfficerWeek({
+  plantId,
+  requestedWeekStart,
+  referenceDate,
+}) {
+  const {
+    weekStart: currentWeekStart,
+  } = getCurrentWeekRange(
+    referenceDate,
+  );
+
+  const weekStart =
+    requestedWeekStart ??
+    (await dashboardRepository
+      .findOfficerDefaultWeekStart({
+        plantId,
+        currentWeekStart,
+      })) ??
+    currentWeekStart;
+
+  /*
+   * The Sunday, inclusive, which is what the card shows and what the
+   * week queries filter on. getCurrentWeekRange's end is the exclusive
+   * next Monday, which its other callers rely on.
+   */
+  const weekEnd = addDaysToDateOnly(
+    weekStart,
+    6,
+  );
+
+  const {
+    zoneEditFromDate,
+    zoneEditToDate,
+  } = getZoneEditRange(
+    weekStart,
+    currentWeekStart,
+  );
+
+  const [
+    rows,
+    adjacentWeeks,
+  ] = await Promise.all([
+    dashboardRepository
+      .findOfficerPatrolsInWeek({
+        plantId,
+        weekStart,
+        weekEnd,
+      }),
+
+    dashboardRepository
+      .findOfficerAdjacentWeeks({
+        plantId,
+        weekStart,
+        weekEnd,
+      }),
+  ]);
+
+  /* A past week offers no zone edit, so there is nothing to count. */
+  const reassignableCounts =
+    zoneEditFromDate
+      ? await dashboardRepository
+        .countReassignableZonePatrols({
+          zoneIds: [
+            ...new Set(
+              rows.map((row) => row.zoneId),
+            ),
+          ],
+          fromDate: zoneEditFromDate,
+          toDate: zoneEditToDate,
+        })
+      : new Map();
+
+  return buildOfficerWeek({
+    weekStart,
+    weekEnd,
+    currentWeekStart,
+    previousWeekStart:
+      adjacentWeeks.previousWeekStart,
+    nextWeekStart:
+      adjacentWeeks.nextWeekStart,
+    zoneEditFromDate,
+    zoneEditToDate,
+    reassignableCounts,
+    rows,
+  });
+}
+
+/**
+ * One week of the officer's plant for the dashboard week card, which
+ * moves between weeks and reloads after a save without re-fetching the
+ * metrics and the calendar. `weekStart` is any "YYYY-MM-DD" date and is
+ * moved back to its Monday; absent means the default week.
+ */
+export async function getOfficerWeek({
+  user,
+  weekStart,
+  referenceDate = new Date(),
+}) {
+  const requestedWeekStart =
+    parseOfficerWeekStart(weekStart);
+
+  const plant =
+    await dashboardRepository
+      .findOfficerPlant(user.id);
+
+  if (!plant) {
+    throw new AppError(
+      "Your account is not assigned to a location, so audits cannot be planned. Ask an administrator to set your location.",
+      400,
+      "EHS_OFFICER_LOCATION_NOT_SET",
+    );
+  }
+
+  return loadOfficerWeek({
+    plantId: plant.id,
+    requestedWeekStart,
+    referenceDate,
+  });
 }
 
 function parseDashboardPeriod(
@@ -504,16 +773,29 @@ export async function getDashboardData({
     const [
       monthlyAudits,
       currentWeekAudits,
+      ownCurrentWeekAudits,
       annualMetrics,
     ] = await Promise.all([
       dashboardRepository
         .findManagementMonthlyPatrols({
+          userId: user.id,
           monthStart,
           monthEnd,
         }),
 
       dashboardRepository
         .findManagementCurrentWeekPatrols({
+          weekStart,
+          weekEnd,
+        }),
+
+      /*
+       * A manager, the officer included, may be rostered as auditor or
+       * auditee like anyone else, and needs the same prompt for it.
+       */
+      dashboardRepository
+        .findUserCurrentWeekPatrols({
+          userId: user.id,
           weekStart,
           weekEnd,
         }),
@@ -529,8 +811,8 @@ export async function getDashboardData({
     /*
      * The weekly plan card is an EHS Officer feature: every location
      * has its own officer, so scoping by their plant is what makes a
-     * single "upcoming inspection week" meaningful. HOD/Plant Head/
-     * Admin keep the existing plant-wide nextWeek list below.
+     * single inspection week meaningful. HOD/Plant Head/Admin keep the
+     * existing plant-wide nextWeek list below.
      */
     let officerWeek = null;
 
@@ -539,15 +821,11 @@ export async function getDashboardData({
         USER_ROLES.EHS_OFFICER &&
       managementPlant
     ) {
-      const weekRows =
-        await dashboardRepository
-          .findOfficerWeekPatrols({
-            plantId: managementPlant.id,
-            weekStart,
-          });
-
-      officerWeek =
-        buildOfficerWeek(weekRows);
+      officerWeek = await loadOfficerWeek({
+        plantId: managementPlant.id,
+        requestedWeekStart: null,
+        referenceDate,
+      });
     }
 
     return {
@@ -594,7 +872,9 @@ export async function getDashboardData({
       },
 
       audits: monthlyAudits,
-      nextAudit: null,
+      nextAudit: selectCurrentUserTask(
+        ownCurrentWeekAudits,
+      ),
 
       nextWeek: createManagementWeek(
         currentWeekAudits,
@@ -656,6 +936,7 @@ export async function getDashboardData({
     audits: monthlyAudits,
     nextAudit,
     nextWeek: null,
+    officerWeek: null,
 
     metrics: {
       scope: "SELF",

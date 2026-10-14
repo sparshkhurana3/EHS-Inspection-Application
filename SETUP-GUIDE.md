@@ -79,6 +79,7 @@ If the server reaches the internet only through a proxy, see §4.3.
    add VPN or **Microsoft Entra application proxy** (§11.5).
 4. **Who is who.** For each plant: the EHS Officer(s), the management
    roles, and the auditors and auditees with their work email address.
+   The EHS Officer may be one of the auditors or auditees.
 5. **The locations.** For each plant: its units, the zones in each unit,
    and the fixed list of areas in each zone.
 
@@ -407,8 +408,8 @@ Two facts drive this chapter:
 
 1. **Everyone belongs to a plant** (`plant_id`). An EHS Officer cannot
    plan audits, upload the roster, or download the inspection report
-   without one, and only people at the officer's plant appear in the
-   auditor and auditee choices.
+   without one, and only people at the officer's plant, the officer
+   included, appear in the auditor and auditee choices.
 2. **The weekly roster names people by email**, and only matches
    accounts that already exist and belong to the officer's plant.
    Accounts created at first sign-in have no plant.
@@ -455,6 +456,29 @@ template (it is pre-filled with that plant's locations), fills in the
 auditor and auditee email for each zone, and uploads it. The upload
 schedules every zone for every Monday until 31 December. **It has to be
 uploaded again each January** for the new year.
+
+- **The officer may put their own email in the file**, as the auditor
+  of one zone or the auditee of another. They then file that report, or
+  answer that closure, like anyone else, and the dashboard prompts them
+  for it. The only rule is that a zone's auditor and auditee are two
+  different people.
+- **The officer may approve a closure on which they are the auditee.**
+  This was decided by the business: the approval screen warns them that
+  they are signing off their own action plans, but does not stop them.
+  If you want a second reviewer for those, do not roster the officer as
+  an auditee.
+- **People change during the year: do not re-upload for that.** On the
+  dashboard, the officer opens the week card, moves to the week the
+  change starts (Previous / Next), presses **Edit** on the zone and
+  chooses either *every audit of this zone* from that week to
+  31 December, or *only this audit*. Audits already under way keep their
+  people, and the confirmation says how many changed.
+- **Uploading the roster again overwrites those changes.** A re-upload
+  rebuilds every upcoming Monday audit generated from the roster, from
+  the file, so any auditor or auditee changed on the dashboard goes back
+  to what the file says. Audits already carried out, and audits
+  scheduled by hand, are left alone. The Plan page asks before it does
+  this; update the file first if you need to re-upload.
 
 ---
 

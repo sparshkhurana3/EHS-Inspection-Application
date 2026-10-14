@@ -207,13 +207,13 @@ export async function findPlanningScope(
 
 /**
  * Everyone registered at a location is eligible to audit or be audited
- * there. Selection is by location rather than by an AUDITOR/AUDITEE
- * role code, which only ever existed in the test seed scripts.
+ * there, the EHS Officer included. Selection is by location rather than
+ * by an AUDITOR/AUDITEE role code, which only ever existed in the test
+ * seed scripts.
  */
 export async function findUsersAtLocation(
   {
     plantId,
-    excludeUserId = null,
   },
   client = databasePool,
 ) {
@@ -230,13 +230,12 @@ export async function findUsersAtLocation(
       WHERE
         app_user.plant_id = $1
         AND app_user.is_active = TRUE
-        AND ($2::BIGINT IS NULL OR app_user.id <> $2)
 
       ORDER BY
         app_user.full_name,
         app_user.username
     `,
-    [plantId, excludeUserId],
+    [plantId],
   );
 
   return result.rows.map(mapUser);
@@ -587,7 +586,6 @@ export async function findActiveUsersByEmail(
   {
     plantId,
     emails,
-    excludeUserId = null,
   },
   client = databasePool,
 ) {
@@ -604,9 +602,8 @@ export async function findActiveUsersByEmail(
         app_user.plant_id = $1
         AND app_user.is_active = TRUE
         AND LOWER(app_user.email) = ANY($2::TEXT[])
-        AND ($3::BIGINT IS NULL OR app_user.id <> $3)
     `,
-    [plantId, emails, excludeUserId],
+    [plantId, emails],
   );
 
   const usersByEmail = new Map();
@@ -858,79 +855,99 @@ export async function generateRosterPatrols(
 }
 
 /**
- * A zone's future SCHEDULED patrols in a date range, locked for update
- * so a concurrent edit cannot race the reassignment below.
+ * Moves a zone's audits in [fromDate, toDate] to a new auditor and
+ * auditee, hand-planned and roster-generated alike. Only an audit still
+ * SCHEDULED with no observation report changes; the zone's other
+ * non-cancelled audits in the range are under way, their report and
+ * closure already name the people doing them, and they come back as
+ * skippedCount.
+ *
+ * Two statements on purpose. The first locks every non-cancelled audit
+ * in the range (FOR UPDATE cannot share a statement with the counts),
+ * so no report can be filed against one before the second statement
+ * re-checks it: observation submission locks the same row first. The
+ * lock only holds inside a transaction, so pass the transaction client.
  */
-export async function findUpcomingZonePatrolsForAssignment(
+export async function reassignZonePatrols(
   {
     zoneId,
     fromDate,
     toDate,
-  },
-  client = databasePool,
-) {
-  const result = await client.query(
-    `
-      SELECT id, scheduled_date
-      FROM patrols
-      WHERE
-        zone_id = $1
-        AND status = 'SCHEDULED'
-        AND scheduled_date BETWEEN $2::DATE AND $3::DATE
-      ORDER BY scheduled_date
-      FOR UPDATE
-    `,
-    [zoneId, fromDate, toDate],
-  );
-
-  return result.rows.map((row) => ({
-    id: row.id,
-    scheduledDate: row.scheduled_date,
-  }));
-}
-
-
-/**
- * Reassigns the auditor and auditee on every listed patrol still
- * SCHEDULED. Used to propagate an edit across a zone's upcoming
- * Mondays.
- */
-export async function updatePatrolAssignments(
-  {
-    patrolIds,
     auditorId,
     auditeeId,
   },
   client = databasePool,
 ) {
-  const result = await client.query(
+  const lockedResult = await client.query(
     `
-      UPDATE patrols
-      SET
-        auditor_id = $1,
-        auditee_id = $2,
-        updated_at = NOW()
+      SELECT patrol.id
+
+      FROM patrols AS patrol
+
       WHERE
-        id = ANY($3::BIGINT[])
-        AND status = 'SCHEDULED'
-      RETURNING id
+        patrol.zone_id = $1
+        AND patrol.status <> 'CANCELLED'
+        AND patrol.scheduled_date
+          BETWEEN $2::DATE AND $3::DATE
+
+      ORDER BY patrol.id
+
+      FOR UPDATE
     `,
-    [auditorId, auditeeId, patrolIds],
+    [zoneId, fromDate, toDate],
   );
 
-  return result.rows.length;
+  const lockedIds = lockedResult.rows.map(
+    (row) => row.id,
+  );
+
+  const updatedResult = await client.query(
+    `
+      UPDATE patrols AS patrol
+      SET
+        auditor_id = $2,
+        auditee_id = $3,
+        updated_at = NOW()
+      WHERE
+        patrol.id = ANY($1::BIGINT[])
+        AND patrol.status = 'SCHEDULED'
+        AND NOT EXISTS (
+          SELECT 1
+          FROM observation_reports AS report
+          WHERE report.patrol_id = patrol.id
+        )
+      RETURNING patrol.id
+    `,
+    [lockedIds, auditorId, auditeeId],
+  );
+
+  const updatedIds = updatedResult.rows.map(
+    (row) => row.id,
+  );
+
+  return {
+    updatedIds,
+    updatedCount: updatedIds.length,
+    skippedCount:
+      lockedIds.length - updatedIds.length,
+  };
 }
 
 /**
  * Updates a zone's roster row to match a propagated assignment change,
- * so the next roster upload or view reflects it. Returns null when the
- * zone has no roster row, which is not an error.
+ * so the next roster upload or view reflects it. Only a row whose
+ * effective range overlaps [fromDate, toDate] changes: between 29 and
+ * 31 December a re-upload may already have made the row next year's,
+ * and a December edit must not rewrite that. Returns null when no row
+ * matches, which is not an error.
  */
 export async function updateRosterAssignmentForZone(
   {
     zoneId,
     auditorId,
     auditeeId,
+    fromDate,
+    toDate,
   },
   client = databasePool,
 ) {
@@ -941,10 +958,19 @@ export async function updateRosterAssignmentForZone(
         auditor_id = $1,
         auditee_id = $2,
         updated_at = NOW()
-      WHERE zone_id = $3
+      WHERE
+        zone_id = $3
+        AND effective_from <= $5::DATE
+        AND effective_to >= $4::DATE
       RETURNING id
     `,
-    [auditorId, auditeeId, zoneId],
+    [
+      auditorId,
+      auditeeId,
+      zoneId,
+      fromDate,
+      toDate,
+    ],
   );
 
   return result.rows[0] ?? null;

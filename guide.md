@@ -173,7 +173,7 @@ that your organisation actually uses. For every one:
 
 | Display name | Value | What it lets someone do |
 |---|---|---|
-| EHS Officer | `EHS_OFFICER` | Plan patrols, upload the weekly roster, download the inspection report, approve or reject closures |
+| EHS Officer | `EHS_OFFICER` | Plan patrols, upload the weekly roster, change a zone's auditor and auditee from the dashboard, download the inspection report, approve or reject closures. Can also be rostered as an auditor or auditee |
 | Head of Department | `HOD` | Plant-wide management dashboard; can also approve or reject closures |
 | Plant Head | `PLANT_HEAD` | Plant-wide management dashboard; can also approve or reject closures |
 | Administrator | `ADMIN` | Everything an EHS Officer can do. There are no separate administration screens |
@@ -184,13 +184,22 @@ Notes that save trouble later:
 - **Most staff need no role at all.** Anyone who signs in without one is
   given `USER` automatically, which is exactly what an auditor or
   auditee needs. Only assign a role to people who need more.
-- **Give an EHS Officer `EHS_OFFICER` and nothing else from the
-  management roles.** Someone who also holds `HOD` or `PLANT_HEAD` may
-  land on the plain management dashboard instead of the officer's view.
+- **An EHS Officer needs `EHS_OFFICER` and nothing else.** They do not
+  need `USER` as well to carry out an audit: when the roster names them
+  as an auditor or auditee they do that work like anyone else. Someone
+  who holds `EHS_OFFICER` together with `HOD` or `PLANT_HEAD` still gets
+  the officer's dashboard.
 - **Management roles can approve closures.** Anyone holding
   `EHS_OFFICER`, `HOD`, `PLANT_HEAD` or `ADMIN` who is also the auditor
   or auditee of a patrol can approve that patrol's closure. Keep that in
   mind when you roster managers as auditees.
+- **That includes the EHS Officer approving their own action plans.**
+  When the officer is the auditee of an audit they planned, its closure
+  still comes to their own approval queue, and they may approve it. This was a
+  business decision; the app shows them a warning ("You are the auditee
+  of this audit, so approving it signs off your own action plans.")
+  rather than routing it to someone else. If your organisation needs a
+  second pair of eyes, do not roster the officer as an auditee.
 
 Choose **Apply** for each role.
 
@@ -427,6 +436,7 @@ with the time, IP address and browser.
 |---|---|
 | Before the client secret expires | Create the new secret, update `.env`, `docker compose up -d`, then delete the old one. Both work during the overlap, so there is no outage. |
 | Somebody changes job | Change their group membership. Their app roles follow at their next sign-in. |
-| Somebody leaves | Disabling their Entra account stops new sign-ins, but a session they already have lasts up to 8 hours. To cut them off at once, also run `docker compose exec backend node scripts/admin.js deactivate-user --user <email>`. Their audit history stays intact. |
+| Somebody leaves | Disabling their Entra account stops new sign-ins, but a session they already have lasts up to 8 hours. To cut them off at once, also run `docker compose exec backend node scripts/admin.js deactivate-user --user <email>`. Their audit history stays intact. Neither step takes them off the roster: ask the EHS Officer to give their zones to someone else from the dashboard. |
+| An auditor or auditee changes | Nothing for you to do. The EHS Officer changes the zone's people on the dashboard (**Edit** on the zone in the week card), for every remaining audit of the year or for one week only. Uploading the roster again would overwrite such changes. |
 | An EHS Officer hands over | `admin.js reassign-officer --from <old> --to <new>` moves their open patrols, so the new officer can approve those closures. |
 | Quarterly | Review who is in each role group, and test a break-glass account. |

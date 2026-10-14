@@ -72,6 +72,67 @@ function getFirstMondayOnOrAfter(dateOnly) {
 }
 
 /**
+ * The Monday on or before a "YYYY-MM-DD" date, as the same shape: the
+ * start of that date's Monday-to-Sunday week.
+ * (day + 6) % 7: Monday (1) -> -0, ... Sunday (0) -> -6.
+ */
+function getMondayOnOrBefore(dateOnly) {
+  const date = new Date(
+    `${dateOnly}T00:00:00Z`,
+  );
+
+  date.setUTCDate(
+    date.getUTCDate() -
+      ((date.getUTCDay() + 6) % 7),
+  );
+
+  return date
+    .toISOString()
+    .slice(0, 10);
+}
+
+/**
+ * A submitted "YYYY-MM-DD" date if it names a real day, else null.
+ * The round trip is the check: Date rolls 2026-02-30 over to 2 March
+ * instead of rejecting it.
+ */
+function toValidDateOnly(value) {
+  const dateOnly = String(value ?? "");
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) {
+    return null;
+  }
+
+  const date = new Date(
+    `${dateOnly}T00:00:00Z`,
+  );
+
+  return !Number.isNaN(date.getTime()) &&
+    date.toISOString().slice(0, 10) ===
+      dateOnly
+    ? dateOnly
+    : null;
+}
+
+/*
+ * "16 Feb 2026", for dates quoted in a response message. UTC because
+ * these are calendar days, which the server's own zone must not shift.
+ */
+const MESSAGE_DATE_FORMAT =
+  new Intl.DateTimeFormat("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+
+function formatMessageDate(dateOnly) {
+  return MESSAGE_DATE_FORMAT.format(
+    new Date(`${dateOnly}T00:00:00Z`),
+  );
+}
+
+/**
  * Every Monday from firstMonday to lastDate inclusive, as
  * "YYYY-MM-DD" strings.
  */
@@ -125,9 +186,58 @@ async function requireOfficerLocation(
 }
 
 /**
+ * The auditor and the auditee must each be an active user at the
+ * officer's location. The officer may be either one.
+ */
+async function requireAssignablePeople(
+  {
+    auditorId,
+    auditeeId,
+    plantId,
+  },
+  client,
+) {
+  const auditor =
+    await patrolRepository
+      .findActiveUserAtLocation(
+        {
+          userId: auditorId,
+          plantId,
+        },
+        client,
+      );
+
+  if (!auditor) {
+    throw new AppError(
+      "The selected auditor is not an active user at this location.",
+      400,
+      "INVALID_AUDITOR",
+    );
+  }
+
+  const auditee =
+    await patrolRepository
+      .findActiveUserAtLocation(
+        {
+          userId: auditeeId,
+          plantId,
+        },
+        client,
+      );
+
+  if (!auditee) {
+    throw new AppError(
+      "The selected auditee is not an active user at this location.",
+      400,
+      "INVALID_AUDITEE",
+    );
+  }
+}
+
+/**
  * Everything the planning form needs, scoped to the officer's location:
- * their units and zones, each zone's fixed areas, and the colleagues who
- * can be assigned as auditor or auditee.
+ * their units and zones, each zone's fixed areas, and everyone who can
+ * be assigned as auditor or auditee.
  */
 export async function getPlanningLookups({ userId }) {
   const location =
@@ -138,14 +248,13 @@ export async function getPlanningLookups({ userId }) {
       location.id,
     ),
 
+    /*
+     * The officer is included: they may be rostered as auditor or
+     * auditee like anyone else at the location. The only person rule
+     * is that one audit's auditor and auditee differ.
+     */
     patrolRepository.findUsersAtLocation({
       plantId: location.id,
-
-      /*
-       * The officer plans the audit; they do not walk it. Excluding
-       * them keeps them out of both dropdowns.
-       */
-      excludeUserId: userId,
     }),
   ]);
 
@@ -309,41 +418,14 @@ export async function schedulePatrol(input) {
         );
       }
 
-      const auditor =
-        await patrolRepository
-          .findActiveUserAtLocation(
-            {
-              userId: auditorId,
-              plantId: location.id,
-            },
-            client,
-          );
-
-      if (!auditor) {
-        throw new AppError(
-          "The selected auditor is not an active user at this location.",
-          400,
-          "INVALID_AUDITOR",
-        );
-      }
-
-      const auditee =
-        await patrolRepository
-          .findActiveUserAtLocation(
-            {
-              userId: auditeeId,
-              plantId: location.id,
-            },
-            client,
-          );
-
-      if (!auditee) {
-        throw new AppError(
-          "The selected auditee is not an active user at this location.",
-          400,
-          "INVALID_AUDITEE",
-        );
-      }
+      await requireAssignablePeople(
+        {
+          auditorId,
+          auditeeId,
+          plantId: location.id,
+        },
+        client,
+      );
 
       /*
        * One person may audit, or be audited on, several zones on the
@@ -432,16 +514,64 @@ function validateAssignmentInput({
 }
 
 /**
+ * Gives every audit of a zone in [fromDate, toDate] that is still
+ * SCHEDULED with no observation report a new auditor and auditee, and
+ * the zone's roster row with them when its range overlaps. The one
+ * implementation behind both the zone edit and a patrol edit with
+ * applyToUpcoming. A caller that rejects the result throws, which rolls
+ * both writes back.
+ */
+async function reassignZoneAudits(
+  {
+    zoneId,
+    auditorId,
+    auditeeId,
+    fromDate,
+    toDate,
+  },
+  client,
+) {
+  const reassignment =
+    await patrolRepository
+      .reassignZonePatrols(
+        {
+          zoneId,
+          fromDate,
+          toDate,
+          auditorId,
+          auditeeId,
+        },
+        client,
+      );
+
+  if (reassignment.updatedCount > 0) {
+    await patrolRepository
+      .updateRosterAssignmentForZone(
+        {
+          zoneId,
+          auditorId,
+          auditeeId,
+          fromDate,
+          toDate,
+        },
+        client,
+      );
+  }
+
+  return reassignment;
+}
+
+/**
  * Reassigns the auditor and/or auditee on a patrol the officer scheduled.
  * Only reachable while the patrol is still SCHEDULED: no observation
  * report has been filed and no closure opened, so nothing yet refers to
  * the people being replaced.
  *
  * When applyToUpcoming is true (the default), the change is propagated
- * to every SCHEDULED patrol for the same zone from the edited patrol's
- * date to 31 December of that year, roster-generated or manually
- * planned alike, and the zone's roster row (if any) is updated to
- * match. When false, only the one patrol changes.
+ * through reassignZoneAudits to the zone's audits from the edited
+ * patrol's date to 31 December of that year, roster-generated or
+ * manually planned alike, and the zone's roster row (if any) is updated
+ * to match. When false, only the one patrol changes.
  */
 export async function updatePatrolAssignment(
   input,
@@ -497,41 +627,14 @@ export async function updatePatrolAssignment(
       );
     }
 
-    const auditor =
-      await patrolRepository
-        .findActiveUserAtLocation(
-          {
-            userId: auditorId,
-            plantId: location.id,
-          },
-          client,
-        );
-
-    if (!auditor) {
-      throw new AppError(
-        "The selected auditor is not an active user at this location.",
-        400,
-        "INVALID_AUDITOR",
-      );
-    }
-
-    const auditee =
-      await patrolRepository
-        .findActiveUserAtLocation(
-          {
-            userId: auditeeId,
-            plantId: location.id,
-          },
-          client,
-        );
-
-    if (!auditee) {
-      throw new AppError(
-        "The selected auditee is not an active user at this location.",
-        400,
-        "INVALID_AUDITEE",
-      );
-    }
+    await requireAssignablePeople(
+      {
+        auditorId,
+        auditeeId,
+        plantId: location.id,
+      },
+      client,
+    );
 
     if (!applyToUpcoming) {
       const updated =
@@ -553,69 +656,47 @@ export async function updatePatrolAssignment(
       return;
     }
 
+    /*
+     * From the patrol's own date, not clamped to this week: the edit is
+     * anchored on this patrol, so it reaches back as far as the patrol.
+     */
     const fromDate = toDateOnlyString(
       existingPatrol.scheduledDate,
     );
 
-    const toDate =
-      `${fromDate.slice(0, 4)}-12-31`;
-
-    const targets =
-      await patrolRepository
-        .findUpcomingZonePatrolsForAssignment(
-          {
-            zoneId: existingPatrol.zoneId,
-            fromDate,
-            toDate,
-          },
-          client,
-        );
-
-    /*
-     * target.id comes back from `pg` as a string (BIGINT), while
-     * patrolId is the parsed number from the route param, so the
-     * membership check below needs both sides normalized the same way.
-     */
-    const targetIds = targets.map(
-      (target) => Number(target.id),
-    );
-
-    if (!targetIds.includes(patrolId)) {
-      throw new AppError(
-        "The auditor and auditee can only be changed before an observation report has been filed for this audit.",
-        409,
-        "PATROL_NOT_EDITABLE",
-      );
-    }
-
-    updatedCount =
-      await patrolRepository
-        .updatePatrolAssignments(
-          {
-            patrolIds: targetIds,
-            auditorId,
-            auditeeId,
-          },
-          client,
-        );
-
-    if (updatedCount === 0) {
-      throw new AppError(
-        "The auditor and auditee can only be changed before an observation report has been filed for this audit.",
-        409,
-        "PATROL_NOT_EDITABLE",
-      );
-    }
-
-    await patrolRepository
-      .updateRosterAssignmentForZone(
+    const reassignment =
+      await reassignZoneAudits(
         {
           zoneId: existingPatrol.zoneId,
           auditorId,
           auditeeId,
+          fromDate,
+          toDate: `${fromDate.slice(0, 4)}-12-31`,
         },
         client,
       );
+
+    /*
+     * The edited patrol must be one of those moved. If it is already
+     * under way the edit fails as a whole, and throwing here rolls back
+     * the zone's other audits and its roster row with it. Ids from `pg`
+     * are strings (BIGINT) and patrolId is a number, hence String().
+     */
+    const editedPatrolMoved =
+      reassignment.updatedIds.some(
+        (id) =>
+          String(id) === String(patrolId),
+      );
+
+    if (!editedPatrolMoved) {
+      throw new AppError(
+        "The auditor and auditee can only be changed before an observation report has been filed for this audit.",
+        409,
+        "PATROL_NOT_EDITABLE",
+      );
+    }
+
+    updatedCount = reassignment.updatedCount;
   });
 
   return {
@@ -631,6 +712,168 @@ export async function updatePatrolAssignment(
       await patrolRepository.findPatrolById(
         patrolId,
       ),
+  };
+}
+
+/**
+ * The dashboard's zone edit: gives every audit of a zone that is still
+ * SCHEDULED with no observation report, from fromDate to 31 December, a
+ * new auditor and auditee, and the zone's roster row with them. No
+ * anchor audit is needed, so a report already filed this week does not
+ * block changing the zone's future. Audits under way in the range keep
+ * their people and are counted as skipped.
+ *
+ * fromDate is clamped to the Monday of the current week: an audit due
+ * earlier this week and not yet filed can still be handed over, while
+ * an overdue one from a past week stays with the person who owes it.
+ */
+export async function updateZoneAssignment(
+  input,
+) {
+  const {
+    auditorId,
+    auditeeId,
+  } = validateAssignmentInput(input);
+
+  const requestedFromDate =
+    toValidDateOnly(input.fromDate);
+
+  if (!requestedFromDate) {
+    throw new AppError(
+      "Select a valid date to apply the change from.",
+      400,
+      "INVALID_FROM_DATE",
+    );
+  }
+
+  const zoneId = toPositiveInteger(
+    input.zoneId,
+  );
+
+  if (!zoneId) {
+    throw new AppError(
+      "The selected zone was not found.",
+      404,
+      "ZONE_NOT_FOUND",
+    );
+  }
+
+  const currentWeekStart =
+    getMondayOnOrBefore(
+      getCurrentDate(),
+    );
+
+  /*
+   * Both sides are YYYY-MM-DD, so a string comparison is a date
+   * comparison.
+   */
+  const fromDate =
+    requestedFromDate > currentWeekStart
+      ? requestedFromDate
+      : currentWeekStart;
+
+  const toDate =
+    `${fromDate.slice(0, 4)}-12-31`;
+
+  const {
+    zone,
+    reassignment,
+  } = await withTransaction(
+    async (client) => {
+      const location =
+        await requireOfficerLocation(
+          input.userId,
+          client,
+        );
+
+      const selectedZone =
+        await patrolRepository
+          .findZoneWithHierarchy(
+            zoneId,
+            client,
+          );
+
+      if (!selectedZone) {
+        throw new AppError(
+          "The selected zone was not found.",
+          404,
+          "ZONE_NOT_FOUND",
+        );
+      }
+
+      if (
+        selectedZone.plantId !== location.id
+      ) {
+        throw new AppError(
+          "The selected zone is outside the location you are responsible for.",
+          403,
+          "ZONE_OUTSIDE_OFFICER_DOMAIN",
+        );
+      }
+
+      await requireAssignablePeople(
+        {
+          auditorId,
+          auditeeId,
+          plantId: location.id,
+        },
+        client,
+      );
+
+      const zoneReassignment =
+        await reassignZoneAudits(
+          {
+            zoneId,
+            auditorId,
+            auditeeId,
+            fromDate,
+            toDate,
+          },
+          client,
+        );
+
+      if (zoneReassignment.updatedCount === 0) {
+        throw new AppError(
+          "This zone has no upcoming audits that can still be reassigned.",
+          409,
+          "NO_REASSIGNABLE_AUDITS",
+        );
+      }
+
+      return {
+        zone: selectedZone,
+        reassignment: zoneReassignment,
+      };
+    },
+  );
+
+  const {
+    updatedCount,
+    skippedCount,
+  } = reassignment;
+
+  const skippedSentence =
+    skippedCount > 0
+      ? ` ${skippedCount} audit${
+          skippedCount === 1 ? "" : "s"
+        } already under way kept ${
+          skippedCount === 1 ? "its" : "their"
+        } auditor and auditee.`
+      : "";
+
+  return {
+    message: `${zone.zoneName} reassigned for ${updatedCount} upcoming audit${
+      updatedCount === 1 ? "" : "s"
+    } from ${formatMessageDate(
+      fromDate,
+    )} to ${formatMessageDate(
+      toDate,
+    )}.${skippedSentence}`,
+
+    updatedCount,
+    skippedCount,
+    fromDate,
+    toDate,
   };
 }
 
@@ -772,7 +1015,6 @@ export async function uploadRoster({
             {
               plantId: location.id,
               emails,
-              excludeUserId: userId,
             },
             client,
           );

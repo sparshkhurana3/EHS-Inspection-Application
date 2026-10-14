@@ -577,15 +577,31 @@ export async function submitObservation({
   try {
     const report = await withTransaction(
       async (client) => {
-        const patrol =
+        /*
+         * Locked before it is read, so a concurrent reassignment by the
+         * EHS Officer cannot change the auditee under this report
+         * (docs/20, D12). No row means it is no longer this auditor's.
+         */
+        const lockedPatrol =
           await observationRepository
-            .findPatrolForSubmission(
+            .lockPatrolForSubmission(
               {
                 patrolId,
                 auditorId: userId,
               },
               client,
             );
+
+        const patrol = lockedPatrol
+          ? await observationRepository
+              .findPatrolForSubmission(
+                {
+                  patrolId,
+                  auditorId: userId,
+                },
+                client,
+              )
+          : null;
 
         if (!patrol) {
           throw new AppError(
@@ -789,15 +805,27 @@ export async function recordNoObservation({
 }) {
   const report = await withTransaction(
     async (client) => {
-      const patrol =
+      /* Locked first, as in submitObservation (docs/20, D12). */
+      const lockedPatrol =
         await observationRepository
-          .findPatrolForSubmission(
+          .lockPatrolForSubmission(
             {
               patrolId,
               auditorId: userId,
             },
             client,
           );
+
+      const patrol = lockedPatrol
+        ? await observationRepository
+            .findPatrolForSubmission(
+              {
+                patrolId,
+                auditorId: userId,
+              },
+              client,
+            )
+        : null;
 
       if (!patrol) {
         throw new AppError(

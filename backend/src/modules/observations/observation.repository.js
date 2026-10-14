@@ -723,6 +723,37 @@ export async function createClosureItems(
   return result.rows.length;
 }
 
+/**
+ * Locks the patrol for the length of a submission, matched on its
+ * auditor (docs/20, D12). The EHS Officer can reassign a scheduled
+ * patrol at any time; without the lock a reassignment committing
+ * between the auditor's read and write would leave the report and
+ * closure naming the old pair. With it one side waits: the
+ * reassignment then skips the filed patrol, or, if it went first, the
+ * old auditor no longer matches and nothing comes back.
+ */
+export async function lockPatrolForSubmission(
+  {
+    patrolId,
+    auditorId,
+  },
+  client,
+) {
+  const result = await client.query(
+    `
+      SELECT id
+      FROM patrols
+      WHERE
+        id = $1
+        AND auditor_id = $2
+      FOR UPDATE
+    `,
+    [patrolId, auditorId],
+  );
+
+  return result.rows[0] ?? null;
+}
+
 export async function findPatrolForSubmission(
   {
     patrolId,

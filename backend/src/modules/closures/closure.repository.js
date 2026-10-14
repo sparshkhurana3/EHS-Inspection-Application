@@ -58,6 +58,20 @@ function mapClosure(row) {
     ehsOfficerName:
       row.ehs_officer_name,
 
+    /*
+     * The patrol's people by id, so the client can recognise the
+     * signed-in user among them: an EHS Officer may approve a closure
+     * on which they are the auditee (docs/20, D9).
+     */
+    auditorId:
+      row.patrol_auditor_id,
+
+    auditeeId:
+      row.patrol_auditee_id,
+
+    ehsOfficerId:
+      row.patrol_ehs_officer_id,
+
     findingDate:
       row.finding_date,
 
@@ -291,6 +305,15 @@ const CLOSURE_SELECT = `
 
     patrol.id AS patrol_id,
     patrol.scheduled_date,
+
+    patrol.auditor_id
+      AS patrol_auditor_id,
+
+    patrol.auditee_id
+      AS patrol_auditee_id,
+
+    patrol.ehs_officer_id
+      AS patrol_ehs_officer_id,
 
     sequence.week_number,
 

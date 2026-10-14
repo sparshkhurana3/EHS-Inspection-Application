@@ -1,6 +1,13 @@
-import { useState } from "react";
+import {
+  useId,
+  useState,
+} from "react";
 
 import Alert from "../../components/Alert.jsx";
+
+import {
+  useAuthenticatedUser,
+} from "../../app/authProvider.jsx";
 
 import { formatDate } from "../../lib/errorMessage.js";
 
@@ -18,16 +25,123 @@ const STATUS_CLASS_BY_CODE = {
     "weekly-status-closed",
 };
 
+/*
+ * What a save changes, passed to OfficerWeekCard's save: ZONE
+ * reassigns every audit of the zone that can still be reassigned from
+ * this week on, AUDIT swaps the people on this one audit only.
+ */
+const SCOPE_ZONE = "ZONE";
+const SCOPE_AUDIT = "AUDIT";
+
+function formatAuditCount(count) {
+  return count === 1
+    ? "1 audit"
+    : `${count} audits`;
+}
+
+/**
+ * The options for one select: every active user at the location, plus
+ * the person on the audit now when they are not among them
+ * (deactivated, or moved to another location). Without that option the
+ * select would silently show somebody else as the current choice.
+ */
+function getCandidates(
+  users,
+  currentId,
+  currentName,
+) {
+  const listed = users.some(
+    (candidate) =>
+      String(candidate.id) ===
+      String(currentId),
+  );
+
+  if (
+    listed ||
+    currentId === null ||
+    currentId === undefined
+  ) {
+    return users;
+  }
+
+  return [
+    {
+      id: currentId,
+      fullName: currentName,
+    },
+    ...users,
+  ];
+}
+
+function getCandidateLabel(
+  candidate,
+  signedInUserId,
+) {
+  const name =
+    candidate.fullName ??
+    candidate.username ??
+    `User ${candidate.id}`;
+
+  return String(candidate.id) ===
+    String(signedInUserId)
+    ? `${name} (you)`
+    : name;
+}
+
+/**
+ * What opens under a row: nothing filed yet, an audit closed with no
+ * observations (which has no closure to load), or the closure's
+ * progress.
+ */
+function ZoneDetail({ zone }) {
+  if (!zone.observationReportId) {
+    return (
+      <p className="closure-empty-note">
+        No observation report has been
+        filed for this audit yet.
+      </p>
+    );
+  }
+
+  if (!zone.closureId) {
+    return (
+      <p className="closure-empty-note">
+        This audit was closed with no
+        observations to record, so there
+        is no action plan to follow.
+      </p>
+    );
+  }
+
+  return (
+    <ZoneProgressDetail
+      closureId={zone.closureId}
+    />
+  );
+}
+
 /**
  * One zone within a unit's weekly plan: its assignment, its status, an
- * inline auditor/auditee edit, and (once an observation report exists)
- * an expandable "current progress" view.
+ * inline auditor/auditee edit, and an expandable "current progress"
+ * view.
+ *
+ * The edit either reassigns the zone from this week to 31 December or
+ * swaps the people on this one audit. The zone option stays available
+ * after this week's audit has been filed, so a filed audit never
+ * blocks changing the zone's future.
  */
 export default function ZoneAssignmentRow({
   zone,
   users,
+  zoneEditFromDate,
+  zoneEditToDate,
   onSaveAssignment,
 }) {
+  const { user } =
+    useAuthenticatedUser();
+
+  const scopeLabelId = useId();
+
   const [editing, setEditing] = useState(false);
   const [detailOpen, setDetailOpen] =
     useState(false);
@@ -39,23 +153,41 @@ export default function ZoneAssignmentRow({
     zone.auditeeId,
   );
 
-  const [
-    applyToUpcoming,
-    setApplyToUpcoming,
-  ] = useState(true);
+  const [scope, setScope] = useState(
+    SCOPE_ZONE,
+  );
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const [successMessage, setSuccessMessage] =
-    useState("");
+
+  const canEdit =
+    zone.canEditAssignment ||
+    zone.canEditZone;
+
+  const usersLoaded = users.length > 0;
+
+  const auditorCandidates = getCandidates(
+    users,
+    zone.auditorId,
+    zone.auditorName,
+  );
+
+  const auditeeCandidates = getCandidates(
+    users,
+    zone.auditeeId,
+    zone.auditeeName,
+  );
 
   function startEditing(event) {
     event.stopPropagation();
     setAuditorId(zone.auditorId);
     setAuditeeId(zone.auditeeId);
-    setApplyToUpcoming(true);
+    setScope(
+      zone.canEditZone
+        ? SCOPE_ZONE
+        : SCOPE_AUDIT,
+    );
     setError("");
-    setSuccessMessage("");
     setEditing(true);
   }
 
@@ -80,13 +212,13 @@ export default function ZoneAssignmentRow({
 
     setSaving(true);
     setError("");
-    setSuccessMessage("");
 
     const result = await onSaveAssignment({
+      scope,
       patrolId: zone.patrolId,
+      zoneId: zone.zoneId,
       auditorId,
       auditeeId,
-      applyToUpcoming,
     });
 
     setSaving(false);
@@ -96,9 +228,6 @@ export default function ZoneAssignmentRow({
       return;
     }
 
-    setSuccessMessage(
-      result?.message ?? "",
-    );
     setEditing(false);
   }
 
@@ -118,6 +247,18 @@ export default function ZoneAssignmentRow({
         tabIndex={0}
         onClick={toggleDetail}
         onKeyDown={(event) => {
+          /*
+           * Keys pressed on the selects and buttons inside the row
+           * bubble up here too. Taking them over would stop Enter and
+           * Space from working on Edit, Save, Cancel and the selects.
+           */
+          if (
+            event.target !==
+            event.currentTarget
+          ) {
+            return;
+          }
+
           if (
             event.key === "Enter" ||
             event.key === " "
@@ -155,14 +296,19 @@ export default function ZoneAssignmentRow({
                   )
                 }
               >
-                {users.map((candidate) => (
-                  <option
-                    key={candidate.id}
-                    value={candidate.id}
-                  >
-                    {candidate.fullName}
-                  </option>
-                ))}
+                {auditorCandidates.map(
+                  (candidate) => (
+                    <option
+                      key={candidate.id}
+                      value={candidate.id}
+                    >
+                      {getCandidateLabel(
+                        candidate,
+                        user?.id,
+                      )}
+                    </option>
+                  ),
+                )}
               </select>
             </span>
 
@@ -181,14 +327,19 @@ export default function ZoneAssignmentRow({
                   )
                 }
               >
-                {users.map((candidate) => (
-                  <option
-                    key={candidate.id}
-                    value={candidate.id}
-                  >
-                    {candidate.fullName}
-                  </option>
-                ))}
+                {auditeeCandidates.map(
+                  (candidate) => (
+                    <option
+                      key={candidate.id}
+                      value={candidate.id}
+                    >
+                      {getCandidateLabel(
+                        candidate,
+                        user?.id,
+                      )}
+                    </option>
+                  ),
+                )}
               </select>
             </span>
           </>
@@ -228,7 +379,9 @@ export default function ZoneAssignmentRow({
               <button
                 type="button"
                 className="button button-primary"
-                disabled={saving}
+                disabled={
+                  saving || !usersLoaded
+                }
                 onClick={saveAssignment}
               >
                 {saving ? "Saving..." : "Save"}
@@ -243,7 +396,7 @@ export default function ZoneAssignmentRow({
                 Cancel
               </button>
             </>
-          ) : zone.canEditAssignment ? (
+          ) : canEdit ? (
             <button
               type="button"
               className="button button-secondary"
@@ -256,48 +409,94 @@ export default function ZoneAssignmentRow({
       </div>
 
       {editing ? (
-        <label
-          className="zone-assignment-scope"
+        <div
+          className="zone-assignment-scope zone-assignment-scope-group"
+          role="radiogroup"
+          aria-labelledby={scopeLabelId}
           onClick={(event) =>
             event.stopPropagation()
           }
         >
-          <input
-            type="checkbox"
-            checked={applyToUpcoming}
-            disabled={saving}
-            onChange={(event) =>
-              setApplyToUpcoming(
-                event.target.checked,
-              )
+          <span
+            id={scopeLabelId}
+            className="zone-assignment-scope-title"
+          >
+            Apply the new auditor and
+            auditee to
+          </span>
+
+          <label
+            className="zone-assignment-scope-option"
+            aria-disabled={!zone.canEditZone}
+          >
+            <input
+              type="radio"
+              name={`${scopeLabelId}-scope`}
+              value={SCOPE_ZONE}
+              checked={scope === SCOPE_ZONE}
+              disabled={
+                saving || !zone.canEditZone
+              }
+              onChange={() =>
+                setScope(SCOPE_ZONE)
+              }
+            />
+            {`Every audit of this zone from ${formatDate(
+              zoneEditFromDate,
+            )} to ${formatDate(
+              zoneEditToDate,
+            )} (${formatAuditCount(
+              zone.reassignableCount ?? 0,
+            )})`}
+          </label>
+
+          <label
+            className="zone-assignment-scope-option"
+            aria-disabled={
+              !zone.canEditAssignment
             }
-          />
-          Apply to every upcoming Monday
-          for this zone until 31 December
-        </label>
+          >
+            <input
+              type="radio"
+              name={`${scopeLabelId}-scope`}
+              value={SCOPE_AUDIT}
+              checked={scope === SCOPE_AUDIT}
+              disabled={
+                saving ||
+                !zone.canEditAssignment
+              }
+              onChange={() =>
+                setScope(SCOPE_AUDIT)
+              }
+            />
+            {`Only this audit on ${formatDate(
+              zone.scheduledDate,
+            )}`}
+          </label>
+
+          {!zone.canEditAssignment ? (
+            <p className="zone-assignment-scope-note">
+              {`The audit on ${formatDate(
+                zone.scheduledDate,
+              )} is already under way, so it keeps its auditor and auditee.`}
+            </p>
+          ) : null}
+
+          {!usersLoaded ? (
+            <p className="zone-assignment-scope-note">
+              Assignments cannot be changed
+              until the user list loads.
+            </p>
+          ) : null}
+        </div>
       ) : null}
 
       {error ? (
         <Alert type="error">{error}</Alert>
       ) : null}
 
-      {successMessage ? (
-        <Alert type="success">
-          {successMessage}
-        </Alert>
-      ) : null}
-
       {detailOpen ? (
-        zone.observationReportId ? (
-          <ZoneProgressDetail
-            closureId={zone.closureId}
-          />
-        ) : (
-          <p className="closure-empty-note">
-            No observation report has been
-            filed for this audit yet.
-          </p>
-        )
+        <ZoneDetail zone={zone} />
       ) : null}
     </li>
   );

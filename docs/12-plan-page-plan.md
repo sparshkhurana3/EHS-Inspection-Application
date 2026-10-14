@@ -80,7 +80,7 @@ Use the shared helpers in `constants/roles.js` rather than the local copies. Add
 
 1. Resolve the caller's `plant_id`. Null → `400 EHS_OFFICER_LOCATION_NOT_SET` with a message naming the fix.
 2. Return only that plant's units and zones, each zone carrying its `areas[]`.
-3. Return candidate users as active users with the same `plant_id`, excluding the officer themselves.
+3. Return candidate users as active users with the same `plant_id`, excluding the officer themselves. *Amended by [20](20-dashboard-assignment-editing-plan.md) D8: the officer is now included, and may be assigned as auditor or auditee like anyone else at the location. The only person rule is that one audit's auditor and auditee differ.*
 
 ```json
 {

@@ -216,7 +216,7 @@ Frontend: `useClosures.js` and `ApprovalPanel.jsx` already implement the queue a
 
 | # | Item | Notes |
 |---|---|---|
-| 2.1 | R9 edit/cancel a patrol | `PATCH /api/patrols/:id` (date, auditor, auditee, area; reuse the conflict check) and `POST /api/patrols/:id/cancel` → `CANCELLED`. Only while `SCHEDULED`. Frontend: edit affordance on the calendar/planning page. |
+| 2.1 | R9 edit/cancel a patrol | **Partly done.** ~~Reassigning the auditor and auditee~~ is done ([20](20-dashboard-assignment-editing-plan.md)): `PATCH /api/patrols/zones/:zoneId/assignment` changes a zone's people from a week to 31 December, `PATCH /api/patrols/:patrolId/assignment` with `applyToUpcoming: false` swaps one audit, both from the dashboard week card, while the audit is `SCHEDULED` with no report. **Still open**: changing an audit's date, and cancelling one (`POST /api/patrols/:id/cancel` → `CANCELLED`, only while `SCHEDULED`). There is no per-person conflict check to reuse any more: one person may cover several zones a day. |
 | 2.2 | R7 overdue alerts | Needs a scheduled job (in-process `setInterval`/`node-cron` in the backend container is enough for one instance) that finds closures past `target_date` still not `APPROVED`, and a notification channel: in-app table + optional SMTP. Design after containerization; the sibling project has a working reference (`ALERT_CRON`, SMTP env). |
 | 2.3 | Logout endpoint | Optional. Would let `authentication_events(LOGOUT)` be written. Token is stateless, so real revocation needs a denylist or short expiry. |
 | 2.4 | Role-based routing on the frontend | Gate `/plan` (and the sidebar link) on `EHS_OFFICER`/`ADMIN`; gate the approval UI likewise. Replace `canPlanAudits = true`. |
@@ -226,8 +226,8 @@ Frontend: `useClosures.js` and `ApprovalPanel.jsx` already implement the queue a
 
 | # | Item |
 |---|---|
-| 3.1 | `authorize("USER")` on observation/closure routes blocks any account without `USER` (management accounts created outside signup). Use `authenticate` only where ownership is checked in SQL, or ensure every account has `USER`. |
-| 3.2 | `authorize("EHS_OFFICER")` on patrols excludes `ADMIN`, while login redirect and dashboard treat `ADMIN` as management. Pick one definition of "management" and put it in `shared/constants/roles.js`. |
+| 3.1 | ~~`authorize("USER")` on observation/closure routes blocks any account without `USER` (management accounts created outside signup).~~ **Fixed**: those routes are `authenticate` only and check patrol membership in SQL, so an officer holding `EHS_OFFICER` alone can file a report or answer a closure. |
+| 3.2 | ~~`authorize("EHS_OFFICER")` on patrols excludes `ADMIN`.~~ **Fixed**: `PLANNING_ROLES` and `MANAGEMENT_ROLES` in `shared/constants/roles.js`. |
 | 3.3 | Server-local vs UTC "today" (`patrol.service`, `closure.service` vs `dashboard.service`). Standardise on one (UTC, with `TZ` set in the container) or on an explicit plant timezone. |
 | 3.4 | Dashboard week/metrics ignore the requested `year`/`month`; `metricsPeriod` is always the current year. Either document as intended or honour the period. |
 | 3.5 | Closure submit updates patrol/report status unconditionally by id; add status preconditions to the `WHERE` clauses. |
@@ -237,7 +237,21 @@ Frontend: `useClosures.js` and `ApprovalPanel.jsx` already implement the queue a
 | 3.9 | No global 401 handling in the frontend; add an interceptor in `apiClient.js` that clears storage and redirects to `/sign-in`, and call `/auth/me` on app load to validate the cached user. |
 | 3.10 | ~~`closure_requests.status` default `'REQUESTED'` violates its own CHECK.~~ **Fixed** in migration 009. |
 | 3.11 | *(promoted to 2.0)* Plant location and area detail are CHECK-constrained free text while `plants`/`zones` tables exist. |
-| 3.12 | Refresh and month-navigation buttons are not disabled during fetches; responses can race. Track an in-flight flag or abort with `AbortController`. |
+| 3.12 | Refresh and month-navigation buttons are not disabled during fetches; responses can race. Track an in-flight flag or abort with `AbortController`. (The officer's week card does both already: `useOfficerWeek` disables its buttons while loading and ignores any response but the newest.) |
+
+### Found while implementing plan 20, left out of its scope
+
+Recorded by [20](20-dashboard-assignment-editing-plan.md) rather than fixed in it.
+
+| # | Item |
+|---|---|
+| 3.13 | **Management calendar has no plant filter.** `dashboard.repository.js` `findManagementMonthlyPatrols` returns every plant's patrols for the month, and `findManagementCurrentWeekPatrols` (the HOD / Plant Head / Admin `nextWeek` list) every plant's patrols for the week, while the metrics and the officer's week card are plant-scoped. Filter both on `units.plant_id` = the manager's plant, or every plant when they have none, as the metrics do. |
+| 3.14 | **Dashboard deep links send `?auditId=`, which no page reads.** `DashboardPage.jsx` `getAuditDestination` builds `/observations?auditId=…` and `/closures?auditId=…&reportId=…`, but `ObservationPage` reads `patrolId`/`reportId` and `ClosurePage` reads `closureId`, so a task card lands on the default list. P1 item 1.7 was closed when the pages gained their query-string state; the links were never switched over. Send `?patrolId=` (the audit id) to observations, and to closures either the closure id (add `closureId` to the dashboard audit) or the plain list. |
+| 3.15 | **The roster page's "Effective A to B" caption ignores dashboard edits.** `RosterTable` shows the upload's `effective_from`/`effective_to` for every row, though a zone edit from the dashboard has since changed the row's people from a later date. Show each row's `updated_at`, or a "changed from the dashboard" marker. |
+| 3.16 | **Zones sort as text.** The week card orders by `zones.name`, so "Zone 10" comes before "Zone 4". Order by `zone_number` cast to an integer where it is numeric, then by name. |
+| 3.17 | **A zone's progress detail 404s on the week card when another officer planned the patrol.** `closure.repository.js` `findClosureByIdForUser` lets in the patrol's auditor, auditee and EHS Officer only, with no plant-management branch, so `ZoneProgressDetail` fails for a patrol whose `ehs_officer_id` is somebody else (after a handover without `reassign-officer`, or a plant with two officers). Add a branch for management at the patrol's plant, as the observation history already has. |
+| 3.18 | **`admin.js deactivate-user` leaves the person on every future patrol and roster row.** They stay as auditor or auditee until somebody notices. The remedy today is the dashboard zone edit, and the row's selects keep a fallback option showing the deactivated person so the current value is not silently replaced. Have the command list the zones and upcoming audits that still name them, or offer to hand them to a named replacement. |
+| 3.19 | **Routing an officer-auditee's closure to another manager.** Declined for now ([20](20-dashboard-assignment-editing-plan.md) D9): the officer may approve a closure on which they are the auditee, with a warning. Note the wider rule as built: anyone holding a management role who is the patrol's auditor, auditee or EHS Officer can approve its closure through the API (`reviewClosure` reads it through `findClosureByIdForUser`). Revisit if segregation of duties becomes a requirement. |
 
 ## P4 — code health and UX
 

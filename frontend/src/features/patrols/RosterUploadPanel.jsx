@@ -32,7 +32,7 @@ export default function RosterUploadPanel({
   async function handleUploadClick() {
     if ((roster?.rows ?? []).length > 0) {
       const confirmed = window.confirm(
-        "This replaces the current roster and every upcoming Monday audit generated from it. Continue?",
+        "This replaces the current roster and every upcoming Monday audit generated from it, including any auditor or auditee changes made from the dashboard. Continue?",
       );
 
       if (!confirmed) {

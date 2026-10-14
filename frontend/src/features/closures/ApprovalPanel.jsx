@@ -2,12 +2,16 @@ import { useState } from "react";
 
 import Alert from "../../components/Alert.jsx";
 
+import {
+  useAuthenticatedUser,
+} from "../../app/authProvider.jsx";
+
 import { formatDate } from "../../lib/errorMessage.js";
 
 /**
  * The EHS Officer's decision on one submitted closure. Approval is the
- * only route to a completed closure; rejecting clears the auditee's
- * action plan and leaves the target date in place.
+ * only route to a completed closure; rejecting reopens every
+ * observation for rework and keeps its plan text and photographs.
  */
 export default function ApprovalPanel({
   closure,
@@ -15,9 +19,20 @@ export default function ApprovalPanel({
   onApprove,
   onReject,
 }) {
+  const { user } = useAuthenticatedUser();
+
   const [comments, setComments] = useState("");
   const [localError, setLocalError] =
     useState("");
+
+  /*
+   * The officer may approve a closure on which they are the auditee.
+   * Nothing stops it, so the panel says plainly what they are signing.
+   */
+  const approvingOwnPlans =
+    closure.auditeeId != null &&
+    String(closure.auditeeId) ===
+      String(user?.id);
 
   function handleReject() {
     if (!comments.trim()) {
@@ -41,14 +56,6 @@ export default function ApprovalPanel({
           <span>Action plan</span>
           <strong>
             {closure.actionPlan ??
-              "Not provided"}
-          </strong>
-        </div>
-
-        <div>
-          <span>Responsible HOD</span>
-          <strong>
-            {closure.responsibleHodName ??
               "Not provided"}
           </strong>
         </div>
@@ -94,6 +101,14 @@ export default function ApprovalPanel({
 
         <span>{comments.length}/1000</span>
       </div>
+
+      {approvingOwnPlans ? (
+        <Alert type="warning">
+          You are the auditee of this audit, so
+          approving it signs off your own action
+          plans.
+        </Alert>
+      ) : null}
 
       <div className="closure-form-actions">
         <button

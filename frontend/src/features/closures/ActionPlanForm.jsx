@@ -66,9 +66,9 @@ export default function ActionPlanForm({
       </header>
 
       {/*
-        * A rejection clears the action plan but keeps the target date,
-        * so the officer's reason has to be visible or the empty field
-        * looks like a bug.
+        * A rejection reopens every observation for rework and keeps its
+        * plan text and photographs, so the officer's reason has to be
+        * visible or the auditee cannot tell what to change.
         */}
       {closure?.wasReturned &&
       closure?.reviewComments ? (

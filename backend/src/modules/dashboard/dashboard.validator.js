@@ -25,3 +25,17 @@ export const dashboardValidationRules = [
     )
     .toInt(),
 ];
+
+/*
+ * Only the shape is checked here; the service parses the date, moves
+ * it to its Monday and bounds the year, because Express 5's req.query
+ * does not keep sanitised values.
+ */
+export const officerWeekValidationRules = [
+  query("weekStart")
+    .optional()
+    .matches(/^\d{4}-\d{2}-\d{2}$/)
+    .withMessage(
+      "Week start must be a date in YYYY-MM-DD format.",
+    ),
+];
