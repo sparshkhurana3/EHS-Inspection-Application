@@ -1,23 +1,24 @@
 import Button from "../../components/Button.jsx";
+
+import { BRAND } from "../../brand/brand.js";
+import BrandMark from "../../brand/BrandMark.jsx";
 import useAuthProviders from "./useAuthProviders.js";
 
 function EhsBrand() {
   return (
     <div className="ehs-brand">
-      <div
+      <BrandMark
         className="ehs-brand-mark"
-        aria-hidden="true"
-      >
-        EHS
-      </div>
+        surface="light"
+      />
 
       <div>
         <strong className="ehs-brand-name">
-          EHS Inspection
+          {BRAND.productName}
         </strong>
 
         <span className="ehs-brand-tagline">
-          Safety patrol and observation management
+          {BRAND.tagline}
         </span>
       </div>
     </div>
@@ -235,10 +236,7 @@ export default function HomePage() {
 
       <footer className="home-footer">
         <div className="home-container home-footer-content">
-          <p>
-            Environmental Health and Safety Inspection
-            Application
-          </p>
+          <p>{BRAND.footerLegal}</p>
 
           <p>
             Safety · Accountability · Continuous improvement

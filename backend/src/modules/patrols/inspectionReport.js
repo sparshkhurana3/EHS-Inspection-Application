@@ -1,4 +1,8 @@
+import { readFile } from "node:fs/promises";
+
 import ExcelJS from "exceljs";
+
+import { BRAND } from "../../shared/brand.js";
 
 /*
  * The EHS Officer's zone-by-week inspection report.
@@ -94,7 +98,7 @@ export async function buildInspectionReportWorkbook({
 }) {
   const workbook = new ExcelJS.Workbook();
 
-  workbook.creator = "EHS Inspection App";
+  workbook.creator = `${BRAND.productName} · ${BRAND.companyName}`;
   workbook.created = new Date();
 
   const sheet = workbook.addWorksheet(
@@ -105,7 +109,7 @@ export async function buildInspectionReportWorkbook({
           state: "frozen",
           /* Keep the zone and its people in view while scrolling weeks. */
           xSplit: FIXED_COLUMNS.length,
-          ySplit: 4,
+          ySplit: 5,
         },
       ],
 
@@ -131,13 +135,28 @@ export async function buildInspectionReportWorkbook({
     })),
   ];
 
+  /* Logo band, above the title block. */
+  const logoRow = sheet.addRow([]);
+
+  logoRow.height = 48;
+
+  const logoImageId = workbook.addImage({
+    buffer: await readFile(BRAND.reportLogoPath),
+    extension: "png",
+  });
+
+  sheet.addImage(logoImageId, {
+    tl: { col: 0, row: 0 },
+    ext: { width: 200, height: 60 },
+  });
+
   /* Title block. */
   const titleRow = sheet.addRow([
     "Inspection status by zone",
   ]);
 
   titleRow.font = { bold: true, size: 14 };
-  sheet.mergeCells(1, 1, 1, Math.max(totalColumns, 2));
+  sheet.mergeCells(2, 1, 2, Math.max(totalColumns, 2));
 
   const subtitleRow = sheet.addRow([
     `${plantName} · ${formatWeekLabel(fromDate)} to ${formatWeekLabel(cutoffDate)} · generated ${
@@ -150,7 +169,7 @@ export async function buildInspectionReportWorkbook({
     color: { argb: "FF667085" },
   };
 
-  sheet.mergeCells(2, 1, 2, Math.max(totalColumns, 2));
+  sheet.mergeCells(3, 1, 3, Math.max(totalColumns, 2));
 
   const legendRow = sheet.addRow([
     "Green = inspection carried out · Red = not carried out · Grey = none scheduled that week." +
@@ -163,7 +182,7 @@ export async function buildInspectionReportWorkbook({
     color: { argb: "FF667085" },
   };
 
-  sheet.mergeCells(3, 1, 3, Math.max(totalColumns, 2));
+  sheet.mergeCells(4, 1, 4, Math.max(totalColumns, 2));
 
   /* Header row. */
   const headerRow = sheet.addRow([
@@ -283,8 +302,8 @@ export async function buildInspectionReportWorkbook({
   }
 
   sheet.autoFilter = {
-    from: { row: 4, column: 1 },
-    to: { row: 4, column: FIXED_COLUMNS.length },
+    from: { row: 5, column: 1 },
+    to: { row: 5, column: FIXED_COLUMNS.length },
   };
 
   return workbook.xlsx.writeBuffer();

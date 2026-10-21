@@ -1,0 +1,46 @@
+/*
+ * Sona Comstar branding for the EHS app.
+ * Import after global.css. Additive only: no existing token, colour, spacing,
+ * radius or type rule is changed. The Sona Comstar logo is monochrome, so the
+ * existing ink palette already is the brand palette.
+ */
+
+/* The brand tile keeps its size, radius and fill; the emblem replaces the letters. */
+.brand-mark-has-emblem {
+  display: grid;
+  place-items: center;
+  font-size: 0;            /* hides any monogram text left in the tile */
+}
+
+.brand-mark-emblem {
+  display: block;
+  width: 74%;
+  height: 74%;
+  object-fit: contain;
+}
+
+/* Full logo. Clear space on every side is a quarter of the logo's height. */
+.brand-company-logo {
+  display: block;
+  height: auto;
+}
+
+/* Auth information panel (ink), top of the panel above the brand lockup. Optional. */
+.brand-company-logo-auth {
+  width: 132px;
+  max-width: 60%;
+  margin-bottom: 28px;
+}
+
+/* Sidebar footer (ink), above the two footer lines. Optional. */
+.brand-company-logo-sidebar {
+  width: 96px;
+  margin-bottom: 12px;
+  opacity: 0.92;
+}
+
+@media (max-width: 760px) {
+  .brand-company-logo-sidebar {
+    display: none;         /* the footer itself is hidden on mobile */
+  }
+}

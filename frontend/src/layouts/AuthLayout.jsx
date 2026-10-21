@@ -1,5 +1,9 @@
 import { Link } from "react-router-dom";
 
+import { BRAND } from "../brand/brand.js";
+import BrandMark from "../brand/BrandMark.jsx";
+import CompanyLogo from "../brand/CompanyLogo.jsx";
+
 export default function AuthLayout({
   title,
   description,
@@ -9,21 +13,27 @@ export default function AuthLayout({
     <div className="auth-page">
       <div className="auth-panel">
         <section className="auth-information-panel">
-          <Link
-            to="/"
-            className="auth-brand"
-          >
-            <span className="auth-brand-mark">
-              EHS
-            </span>
+          <div>
+            <CompanyLogo
+              surface="dark"
+              className="brand-company-logo-auth"
+            />
 
-            <span>
-              <strong>EHS Inspection</strong>
-              <small>
-                Safety patrol and observation management
-              </small>
-            </span>
-          </Link>
+            <Link
+              to="/"
+              className="auth-brand"
+            >
+              <BrandMark
+                className="auth-brand-mark"
+                surface="dark"
+              />
+
+              <span>
+                <strong>{BRAND.productName}</strong>
+                <small>{BRAND.tagline}</small>
+              </span>
+            </Link>
+          </div>
 
           <div className="auth-information-content">
             <span className="auth-information-label">
@@ -42,7 +52,7 @@ export default function AuthLayout({
           </div>
 
           <p className="auth-information-footer">
-            Environmental Health and Safety Tool
+            {BRAND.footerLegal}
           </p>
         </section>
 

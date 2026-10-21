@@ -1,5 +1,7 @@
 import { useState } from "react";
 
+import { BRAND } from "../../brand/brand.js";
+
 import {
   buildEntraSignInUrl,
 } from "./auth.service.js";
@@ -67,8 +69,7 @@ export default function EntraSignInButton({
       </button>
 
       <p className="auth-sso-hint">
-        Use your company Microsoft account. No
-        password needed here.
+        {BRAND.ssoHint}
       </p>
     </div>
   );

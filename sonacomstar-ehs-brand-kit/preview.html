@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>EHS Brand Preview</title>
+<link rel="icon" href="public/brand/icons/favicon.svg" type="image/svg+xml" />
+<style>
+  /* Tokens copied from the EHS design reference, section 2. */
+  :root {
+    --ink: #101828; --ink-hover: #1d2939; --text: #172033; --text-strong: #344054;
+    --text-muted: #475467; --text-subtle: #667085; --text-faint: #98a2b3;
+    --border-control: #d0d5dd; --border-card: #dfe4e9; --border-line: #e4e7ec;
+    --surface-page: #f9fafb; --surface-tint: #f2f4f7; --surface-card: #fff;
+    --shadow-card: 0 6px 22px rgba(16,24,40,.05);
+    --font: Inter, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: var(--font); color: var(--text); background: var(--surface-page); font-synthesis: none; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 28px 16px 60px; }
+  .eyebrow { font-size: .72rem; font-weight: 850; text-transform: uppercase; letter-spacing: .09em; color: var(--ink); }
+  h1 { font-size: 2rem; letter-spacing: -.035em; margin: 5px 0 7px; color: var(--ink); }
+  .lead { color: var(--text-subtle); max-width: 760px; margin: 0 0 22px; }
+  h2 { font-size: 1.2rem; color: var(--ink-hover); margin: 0 0 4px; }
+  .card { background: #fff; border: 1px solid var(--border-card); border-radius: 15px; box-shadow: var(--shadow-card); overflow: hidden; margin-bottom: 22px; }
+  .card-head { padding: 20px 22px; border-bottom: 1px solid var(--border-line); }
+  .card-head p { margin: 0; font-size: .84rem; color: var(--text-subtle); }
+  .card-body { padding: 22px; }
+
+  /* Brand tile, design reference section 6 "Brand mark". */
+  .tile { width: 42px; height: 42px; border-radius: 11px; flex: none; }
+  .tile.lg { width: 48px; height: 48px; border-radius: 14px; }
+  .tile.on-dark { background: #fff; }
+  .tile.on-light { background: var(--ink); }
+  .brand-mark-has-emblem { display: grid; place-items: center; font-size: 0; }
+  .brand-mark-emblem { display: block; width: 74%; height: 74%; object-fit: contain; }
+  .brand-company-logo { display: block; height: auto; }
+
+  /* Shell mock, section 4. */
+  .shell { display: grid; grid-template-columns: 250px minmax(0, 1fr); min-height: 460px; }
+  .sidebar { background: var(--ink); padding: 22px 17px; display: flex; flex-direction: column; }
+  .brand { display: flex; align-items: center; gap: 11px; padding-bottom: 25px; border-bottom: 1px solid rgba(255,255,255,.09); }
+  .brand b { display: block; color: #fff; font-size: .92rem; }
+  .brand small { display: block; color: #98a2b3; font-size: .7rem; }
+  nav { display: grid; gap: 7px; margin-top: 24px; }
+  nav a { display: flex; align-items: center; gap: 10px; min-height: 45px; padding: 9px 11px; border-radius: 9px; color: #cbd5df; font-size: .86rem; font-weight: 700; text-decoration: none; }
+  nav a i { width: 28px; height: 28px; border-radius: 8px; background: rgba(255,255,255,.09); display: grid; place-items: center; font-style: normal; font-size: .72rem; }
+  nav a.active { background: #fff; color: var(--ink); }
+  nav a.active i { background: rgba(16,24,40,.1); }
+  .side-foot { margin-top: auto; padding-top: 24px; color: #667085; font-size: .68rem; line-height: 1.6; }
+  .side-foot .brand-company-logo { width: 96px; margin-bottom: 12px; opacity: .92; }
+  .main { background: var(--surface-page); }
+  .topbar { height: 74px; background: #fff; border-bottom: 1px solid var(--border-line); display: flex; align-items: center; justify-content: space-between; padding: 13px 28px; }
+  .topbar small { display: block; font-size: .68rem; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--text-subtle); }
+  .btn-tool { min-height: 38px; padding: 8px 13px; border-radius: 8px; border: 1px solid var(--border-control); background: #fff; font: 750 .78rem var(--font); color: var(--text-strong); }
+
+  /* Auth info panel, section 5.2. */
+  .auth { background: var(--ink); color: #fff; padding: 45px; min-height: 420px; display: flex; flex-direction: column; justify-content: space-between; position: relative; overflow: hidden; }
+  .auth::before { content: ""; position: absolute; top: -140px; right: -140px; width: 380px; height: 380px; border-radius: 50%; background: radial-gradient(rgba(255,255,255,.1), transparent 70%); }
+  .auth .brand { border: 0; padding: 0; }
+  .auth .tile { width: 47px; height: 47px; }
+  .auth .brand-company-logo { width: 132px; max-width: 60%; margin-bottom: 28px; }
+  .auth h3 { font-size: clamp(2.2rem, 4vw, 3.4rem); line-height: 1.05; letter-spacing: -.04em; margin: 8px 0 12px; }
+  .auth p { color: #e4e7ec; max-width: 420px; margin: 0; }
+  .auth footer { color: #d0d5dd; font-size: .8rem; }
+
+  /* Home header, section 5.1. */
+  .home-head { min-height: 82px; background: rgba(255,255,255,.92); border-bottom: 1px solid var(--border-line); display: flex; align-items: center; justify-content: space-between; padding: 0 22px; }
+  .home-head .brand { border: 0; padding: 0; }
+  .home-head .brand b { color: var(--ink); }
+  .home-head .brand small { color: var(--text-subtle); }
+  .home-head span { font-size: .72rem; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--text-subtle); }
+  .home-foot { min-height: 84px; background: #f8fafc; border-top: 1px solid var(--border-line); display: flex; align-items: center; justify-content: space-between; padding: 0 22px; color: var(--text-subtle); font-size: .78rem; gap: 12px; flex-wrap: wrap; }
+
+  .row { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-end; }
+  .row figure { margin: 0; text-align: center; font-size: .72rem; color: var(--text-subtle); }
+  .row figcaption { margin-top: 8px; }
+  .swatch { padding: 24px; border-radius: 12px; border: 1px solid var(--border-line); }
+  .swatch.dark { background: var(--ink); border-color: var(--ink); }
+  .note { font-size: .8rem; color: var(--text-subtle); margin: 14px 0 0; }
+
+  @media (max-width: 760px) {
+    .shell { grid-template-columns: 1fr; }
+    .side-foot { display: none; }
+    .auth { padding: 28px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="eyebrow">Sona Comstar brand kit</div>
+  <h1>EHS application, branded</h1>
+  <p class="lead">Each placement below uses the design reference's exact sizes and colours. Only the logo and the company name are new. Open this file from the kit folder so the relative asset paths resolve.</p>
+
+  <section class="card">
+    <div class="card-head"><h2>1 · App shell: sidebar and topbar</h2><p>The white brand tile now holds the ink emblem. The tagline reads “Sona Comstar”. The footer logo is optional.</p></div>
+    <div class="shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <span class="tile on-dark brand-mark-has-emblem"><img class="brand-mark-emblem" src="public/brand/logo/sona-comstar-emblem-ink.svg" alt="" /></span>
+          <div><b>EHS</b><small>Sona Comstar</small></div>
+        </div>
+        <nav aria-label="Preview navigation">
+          <a class="active" href="#"><i>D</i>Dashboard</a>
+          <a href="#"><i>O</i>Observations</a>
+          <a href="#"><i>C</i>Closures</a>
+          <a href="#"><i>P</i>Plan</a>
+        </nav>
+        <div class="side-foot">
+          <img class="brand-company-logo" src="public/brand/logo/sona-comstar-logo-white.svg" alt="Sona Comstar" />
+          <div>© 2026 Sona Comstar</div><div>Environment, Health &amp; Safety</div>
+        </div>
+      </aside>
+      <div class="main">
+        <div class="topbar"><div><small>Authenticated workspace</small><b>Signed-in user</b></div><button class="btn-tool" type="button">Sign out</button></div>
+        <div style="padding:28px"><div class="eyebrow">Overview</div><h1>Dashboard</h1><p class="lead">Content area unchanged.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head"><h2>2 · Sign-in information panel</h2><p>The emblem replaces the monogram in the lockup. The full white logo above it is optional.</p></div>
+    <div class="auth">
+      <div>
+        <img class="brand-company-logo" src="public/brand/logo/sona-comstar-logo-white.svg" alt="Sona Comstar" />
+        <div class="brand">
+          <span class="tile on-dark brand-mark-has-emblem"><img class="brand-mark-emblem" src="public/brand/logo/sona-comstar-emblem-ink.svg" alt="" /></span>
+          <div><b>EHS</b><small>Sona Comstar</small></div>
+        </div>
+      </div>
+      <div><div class="eyebrow" style="color:#d0d5dd">Environment, Health &amp; Safety</div><h3>Existing headline</h3><p>The panel copy stays as it is today. Only the lockup above and the footer line below change.</p></div>
+      <footer>© 2026 Sona Comstar</footer>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head"><h2>3 · Home page header and footer</h2><p>The ink tile now holds the white emblem, and the footer carries the company name.</p></div>
+    <div class="home-head">
+      <div class="brand">
+        <span class="tile lg on-light brand-mark-has-emblem"><img class="brand-mark-emblem" src="public/brand/logo/sona-comstar-emblem-white.svg" alt="" /></span>
+        <div><b>EHS</b><small>Sona Comstar</small></div>
+      </div>
+      <span>Sona Comstar · EHS</span>
+    </div>
+    <div style="height:90px"></div>
+    <div class="home-foot"><span>© 2026 Sona Comstar</span><span>Environment, Health &amp; Safety audits</span></div>
+  </section>
+
+  <section class="card">
+    <div class="card-head"><h2>4 · Browser, device and print</h2><p>Favicons, home-screen icons and the inspection report header.</p></div>
+    <div class="card-body">
+      <div class="row">
+        <figure><img src="public/brand/icons/favicon-16x16.png" width="16" height="16" alt="16 pixel favicon" /><figcaption>16</figcaption></figure>
+        <figure><img src="public/brand/icons/favicon-32x32.png" width="32" height="32" alt="32 pixel favicon" /><figcaption>32</figcaption></figure>
+        <figure><img src="public/brand/icons/favicon.svg" width="48" height="48" alt="SVG favicon" /><figcaption>SVG</figcaption></figure>
+        <figure><img src="public/brand/icons/apple-touch-icon.png" width="90" height="90" alt="Apple touch icon" /><figcaption>apple-touch</figcaption></figure>
+        <figure><img src="public/brand/icons/icon-192.png" width="96" height="96" alt="192 pixel app icon" /><figcaption>192</figcaption></figure>
+        <figure><img src="public/brand/icons/icon-maskable-512.png" width="96" height="96" style="border-radius:50%" alt="Maskable icon, circle-cropped" /><figcaption>maskable (circle crop)</figcaption></figure>
+      </div>
+      <div class="row" style="margin-top:26px">
+        <figure class="swatch"><img src="public/brand/print/sona-comstar-report-header.png" width="200" height="60" alt="Report header logo" /><figcaption>Excel report header, 200 × 60 px</figcaption></figure>
+        <figure class="swatch"><img class="brand-company-logo" src="public/brand/logo/sona-comstar-logo-ink.svg" style="width:120px" alt="Sona Comstar" /><figcaption>Logo, ink, light surface</figcaption></figure>
+        <figure class="swatch dark"><img class="brand-company-logo" src="public/brand/logo/sona-comstar-logo-white.svg" style="width:120px" alt="Sona Comstar" /><figcaption style="color:#98a2b3">Logo, white, ink surface</figcaption></figure>
+      </div>
+      <p class="note">Only the emblem's circle survives at 16 px. That is expected for a detailed emblem, and the 32 px and SVG icons carry the detail.</p>
+    </div>
+  </section>
+</div>
+</body>
+</html>

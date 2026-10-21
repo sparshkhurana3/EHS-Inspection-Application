@@ -10,6 +10,10 @@ import {
   canPlanAudits,
 } from "../constants/roles.js";
 
+import { BRAND } from "../brand/brand.js";
+import BrandMark from "../brand/BrandMark.jsx";
+import CompanyLogo from "../brand/CompanyLogo.jsx";
+
 const NAVIGATION_ITEMS = [
   {
     label: "Dashboard",
@@ -65,16 +69,14 @@ export default function Sidebar() {
   return (
     <aside className="app-sidebar">
       <div className="sidebar-brand">
-        <span
+        <BrandMark
           className="sidebar-brand-mark"
-          aria-hidden="true"
-        >
-          EHS
-        </span>
+          surface="dark"
+        />
 
         <div className="sidebar-brand-text">
-          <strong>EHS Inspection</strong>
-          <span>Safety management</span>
+          <strong>{BRAND.productName}</strong>
+          <span>{BRAND.tagline}</span>
         </div>
       </div>
 
@@ -99,8 +101,13 @@ export default function Sidebar() {
       </nav>
 
       <div className="sidebar-footer">
-        <span>Environmental Health</span>
-        <span>and Safety Tool</span>
+        <CompanyLogo
+          surface="dark"
+          className="brand-company-logo-sidebar"
+        />
+
+        <span>{BRAND.footerLegal}</span>
+        <span>Environmental Health and Safety Tool</span>
       </div>
     </aside>
   );
