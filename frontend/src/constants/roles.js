@@ -22,6 +22,14 @@ export const PLANNING_ROLES = Object.freeze([
   APP_ROLES.ADMIN,
 ]);
 
+/*
+ * Who may open the Report page (docs/23). Mirrors REPORT_ROLES on the
+ * backend; the API is the boundary that actually enforces it.
+ */
+export const REPORT_ROLES = Object.freeze([
+  APP_ROLES.EHS_OFFICER,
+]);
+
 export function normalizeRole(role) {
   if (role && typeof role === "object") {
     return normalizeRole(
@@ -81,4 +89,8 @@ export function hasManagementRole(user) {
 
 export function canPlanAudits(user) {
   return hasAnyRole(user, PLANNING_ROLES);
+}
+
+export function canViewReports(user) {
+  return hasAnyRole(user, REPORT_ROLES);
 }

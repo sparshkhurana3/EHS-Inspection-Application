@@ -15,7 +15,8 @@ Line references are as of commit `24bb98a`.
 | `/ehs-officer` | `Navigate → /dashboard` | `AppLayout` | Alias for the backend's EHS Officer `redirectTo` |
 | `/observations` | `ObservationPage` | `AppLayout` | Ignores query params (see gaps) |
 | `/closures` | `ClosurePage` | `AppLayout` | Ignores query params |
-| `/plan` | `PlanningPage` | `AppLayout` | **No role gate** |
+| `/plan` | `PlanningPage` | `AppLayout` | `RequireRole` `PLANNING_ROLES` |
+| `/reports` | `ReportsPage` | `AppLayout` | `RequireRole` `REPORT_ROLES` (EHS Officer only); `?type=weekly&week=YYYY-MM-DD` or `?type=yearly&year=YYYY` opens a generated report |
 | `*` | `Navigate → /` | none | |
 
 - The only auth guard is in `layouts/AppLayout.jsx:30-37`: no token → `<Navigate to="/sign-in" replace />`. There is no role-based route guarding anywhere.
@@ -83,12 +84,22 @@ Line references are as of commit `24bb98a`.
 ### patrols
 
 - **Inspection report**: a "Download inspection report" button in the Plan page header, backed by `useInspectionReport`. The route is authenticated, so the file is fetched with `apiBlobRequest` and handed to the browser through a temporary object URL — a plain `<a href>` could not carry the Bearer token.
-- **Page** `PlanningPage`: spinner → header with the report download → a note describing the report → `WeeklyReportPanel` (week picker and "Download PDF", fed by `useWeeklyReport`, which loads `GET /patrols/weekly-report/weeks` and downloads `GET /patrols/weekly-report?weekStart=` as a blob) → `RosterUploadPanel` (upload, template download, current roster) → the single-audit exception form. Gated to `PLANNING_ROLES` by `RequireRole`, and the API enforces it too.
+- **Page** `PlanningPage`: spinner → header with the report download → a note describing the report (which links to the Report page for weekly and yearly reports) → `RosterUploadPanel` (upload, template download, current roster) → the single-audit exception form. Gated to `PLANNING_ROLES` by `RequireRole`, and the API enforces it too.
 - `PatrolForm`: `scheduledDate` (`min` = today), `unit` and `zone` selects cascading from the lookups, the zone's areas shown read-only, then `auditorId` and `auditeeId` from the one `users` list, the auditee list leaving out whoever is the auditor. The signed-in officer is in both lists, marked "(you)" ([20](20-dashboard-assignment-editing-plan.md) D8); with nobody at the location the form says "No users are registered at this location." Every level has its own empty-state note.
 - `RosterUploadPanel`: the re-upload confirmation says it "replaces the current roster and every upcoming Monday audit generated from it, including any auditor or auditee changes made from the dashboard". `RosterTable`'s "Effective A to B" caption is the upload's range and does not reflect later dashboard edits.
 - **Hook** `usePatrols`: validation order unit → zone → scheduledDate → auditorId → auditeeId → auditor ≠ auditee → the zone has areas.
 - **Service**: `GET /patrols/planning-lookups`, `POST /patrols` `{ zoneId, scheduledDate, auditorId, auditeeId }`, `GET`/`POST /patrols/roster`, `GET /patrols/inspection-report`, `updatePatrolAssignment({ patrolId, auditorId, auditeeId, applyToUpcoming })` → `PATCH /patrols/:id/assignment`, and `updateZoneAssignment({ zoneId, auditorId, auditeeId, fromDate })` → `PATCH /patrols/zones/:zoneId/assignment`. Ids are sent as `Number()`.
 - **Fields read**: `location`, `units[]`, `zones[]` (with `areas[]`), `users[]` (`id`, `fullName`, `username`), `message`.
+
+### Reports (`features/reports/`, [23](23-reports-page-plan.md))
+
+The sidebar's **Report** link and the `/reports` route are for EHS Officers only (`canViewReports`, `REPORT_ROLES`); the API enforces the same.
+
+- `ReportsPage`: Weekly and Yearly tabs (`observation-tabs`), a period picker, **Generate report** and **Download PDF (full report)** (`ReportToolbar`). Nothing is drawn until Generate is pressed; Download works without it and always saves the whole report, whatever the on-screen filters. The generated report's type and period go in the query string, and opening or going Back to such a URL loads that report. The weekly picker lists the server's weeks (newest first); beside it a "go to week [n] of [year]" jump reaches any older week by ISO number (the server converts it, and the URL then names the Monday).
+- Hooks: `useReportOptions` (weeks and years, once), `useReport` (`generate` ignores a response overtaken by a newer one; `download` saves a blob through an object URL). `reports.service.js` wraps the six endpoints.
+- `ReportHeader` draws the Sona Comstar logo and title inside the white `report-sheet`.
+- **Weekly view**: summary tiles (four are filter buttons with `aria-pressed`), outcome chips, unit, risk and search filters with a live "Showing x of y inspections", Expand all / Collapse all / Clear filters, collapsible unit bands, and per-audit rows whose observations expand. Filters change only what is on screen.
+- **Yearly view**: location tiles, unit filter, a sort select mirrored by sortable column headers (`aria-sort`), "Show only zones below 100%", collapsible units (closed from the fifth unit on), a zone row that opens to a week-by-week strip, and a location total row. Completion is written as a percentage; only 100% (green) and below 75% (red) carry colour.
 
 ## Styling
 

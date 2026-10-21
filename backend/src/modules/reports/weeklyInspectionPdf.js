@@ -1,55 +1,41 @@
-import { readFile } from "node:fs/promises";
-
-import PDFDocument from "pdfkit";
+import {
+  BODY_LIMIT,
+  BODY_TOP,
+  CELL_PADDING,
+  COLOURS,
+  CONTENT_WIDTH,
+  INK,
+  MARGIN,
+  columnPositions,
+  createReportDocument,
+  drawBand,
+  drawLines,
+  drawRule as drawSharedRule,
+  drawTableHeader,
+  finishWithFooter,
+  line,
+  measureLines,
+  pluralise,
+  toPdfText,
+} from "./pdfLayout.js";
 
 import {
-  BRAND,
-  footerLegal,
-} from "../../shared/brand.js";
+  formatDayAndMonth,
+  formatReportDate,
+} from "./reportDates.js";
 
 /*
  * The weekly inspection report as a branded PDF.
  *
- * A pure function of the view model patrol.service.js builds: all the
- * counting and labelling is done there, so this file only draws. That is
- * also what lets it be checked with fixture data and no database.
+ * A pure function of the raw weekly model reports.service.js builds
+ * (ISO dates, codes and ready-made labels): all the counting and
+ * labelling is done there, so this file only draws. That is also what
+ * lets it be checked with fixture data and no database. The same model
+ * is what the Report page draws as HTML, so the two cannot disagree.
  *
  * Green and red carry the status, and every status is also written out
  * in words, so the report still reads when printed in black and white.
  */
-
-const INK = "#101828";
-
-const COLOURS = {
-  text: INK,
-  strong: "#344054",
-  muted: "#475467",
-  subtle: "#667085",
-  hairline: "#EAECF0",
-  divider: "#D0D5DD",
-  headerBand: "#F2F4F7",
-  done: { fill: "#D1FADF", text: "#05603A" },
-  missed: { fill: "#FEE4E2", text: "#912018" },
-};
-
-/* A4 landscape, in points. */
-const PAGE_HEIGHT = 595;
-
-const MARGIN = {
-  top: 36,
-  bottom: 40,
-  left: 36,
-  right: 36,
-};
-
-const CONTENT_WIDTH = 770;
-const BODY_TOP = 94;
-
-/* Leaves room for the footer under the last row. */
-const BODY_LIMIT =
-  PAGE_HEIGHT - MARGIN.bottom - 24;
-
-const CELL_PADDING = 4;
 
 const COLUMNS = [
   { key: "zone", label: "Zone", width: 76 },
@@ -65,110 +51,7 @@ const COLUMNS = [
   { key: "closure", label: "Closure", width: 60 },
 ];
 
-const COLUMN_X = (() => {
-  let x = MARGIN.left;
-
-  return COLUMNS.map((column) => {
-    const start = x;
-
-    x += column.width;
-
-    return start;
-  });
-})();
-
-/*
- * Windows-1252 is what pdfkit's built-in fonts can print. Anything else
- * would come out as the wrong glyph, so it is replaced with "?" rather
- * than left to fail quietly.
- */
-const CP1252_EXTRAS =
-  "€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ";
-
-export function toPdfText(value) {
-  if (value === null || value === undefined) {
-    return "";
-  }
-
-  return String(value)
-    .replace(/\r\n?/g, "\n")
-    .replace(/[^\S\n]+/g, " ")
-    .replace(/ ?\n ?/g, "\n")
-    .trim()
-    .replace(
-      /[^ -~ -ÿ\n]/g,
-      (character) =>
-        CP1252_EXTRAS.includes(character)
-          ? character
-          : "?",
-    );
-}
-
-function line(
-  text,
-  {
-    bold = false,
-    size = 7.5,
-    colour = COLOURS.text,
-  } = {},
-) {
-  return {
-    text: toPdfText(text),
-    bold,
-    size,
-    colour,
-  };
-}
-
-function useFont(doc, cellLine) {
-  doc
-    .font(
-      cellLine.bold
-        ? "Helvetica-Bold"
-        : "Helvetica",
-    )
-    .fontSize(cellLine.size);
-}
-
-function measureLines(doc, lines, width) {
-  return lines.reduce((total, cellLine) => {
-    useFont(doc, cellLine);
-
-    return (
-      total +
-      doc.heightOfString(cellLine.text || " ", {
-        width,
-        lineGap: 1,
-      })
-    );
-  }, 0);
-}
-
-function drawLines(doc, lines, x, y, width) {
-  let cursor = y;
-
-  lines.forEach((cellLine) => {
-    useFont(doc, cellLine);
-
-    doc.fillColor(cellLine.colour).text(
-      cellLine.text,
-      x,
-      cursor,
-      { width, lineGap: 1 },
-    );
-
-    cursor += doc.heightOfString(
-      cellLine.text || " ",
-      { width, lineGap: 1 },
-    );
-  });
-}
-
-function pluralise(count, singular) {
-  return `${count} ${singular}${
-    count === 1 ? "" : "s"
-  }`;
-}
+const COLUMN_X = columnPositions(COLUMNS);
 
 function statusColours(inspection) {
   return inspection.outcome === "NOT_DONE"
@@ -248,7 +131,7 @@ function buildInspectionRows(inspection) {
               line(inspection.zoneName, {
                 bold: true,
               }),
-              line(inspection.scheduledDate, {
+              line(formatReportDate(inspection.scheduledDate), {
                 size: 7,
                 colour: COLOURS.subtle,
               }),
@@ -344,7 +227,13 @@ function buildInspectionRows(inspection) {
         ];
 
         cells.target = [
-          line(observation.targetDate ?? "–"),
+          line(
+            observation.targetDate
+              ? formatReportDate(
+                  observation.targetDate,
+                )
+              : "–",
+          ),
         ];
       }
 
@@ -355,106 +244,23 @@ function buildInspectionRows(inspection) {
 
 export async function buildWeeklyInspectionPdf(
   model,
+  { generatedBy },
 ) {
-  const logo = await readFile(
-    BRAND.reportLogoPath,
+  const dueDay = formatDayAndMonth(
+    model.dueDate,
+    "Thu",
   );
 
-  const doc = new PDFDocument({
-    size: "A4",
-    layout: "landscape",
-    margins: MARGIN,
-    bufferPages: true,
+  const { doc, finished } =
+    await createReportDocument({
+      title: "Weekly inspection report",
 
-    info: {
-      Title: `Weekly inspection report · ${model.plantName} · Week ${model.isoWeek}, ${model.isoYear}`,
-      Author: BRAND.companyName,
-      Creator: BRAND.productName,
-    },
-  });
+      subtitle: `${model.plant.name} · Week ${model.isoWeek}, ${model.isoYear} · ${formatReportDate(model.weekStart)} – ${formatReportDate(model.weekEnd)}`,
 
-  const chunks = [];
+      generatedLine: `Generated ${formatReportDate(model.generatedAt)} by ${generatedBy}`,
 
-  doc.on("data", (chunk) => {
-    chunks.push(chunk);
-  });
-
-  const finished = new Promise(
-    (resolve, reject) => {
-      doc.on("end", () => {
-        resolve(Buffer.concat(chunks));
-      });
-
-      doc.on("error", reject);
-    },
-  );
-
-  function drawPageHeader() {
-    doc.image(logo, MARGIN.left, 30, {
-      fit: [150, 45],
+      documentTitle: `Weekly inspection report · ${model.plant.name} · Week ${model.isoWeek}, ${model.isoYear}`,
     });
-
-    doc
-      .font("Helvetica-Bold")
-      .fontSize(15)
-      .fillColor(INK)
-      .text(
-        "Weekly inspection report",
-        MARGIN.left,
-        28,
-        {
-          width: CONTENT_WIDTH,
-          align: "right",
-        },
-      );
-
-    doc
-      .font("Helvetica")
-      .fontSize(9.5)
-      .fillColor(COLOURS.muted)
-      .text(
-        toPdfText(
-          `${model.plantName} · Week ${model.isoWeek}, ${model.isoYear} · ${model.weekStart} – ${model.weekEnd}`,
-        ),
-        MARGIN.left,
-        48,
-        {
-          width: CONTENT_WIDTH,
-          align: "right",
-        },
-      );
-
-    doc
-      .fontSize(8)
-      .fillColor(COLOURS.subtle)
-      .text(
-        toPdfText(
-          `Generated ${model.generatedAt} by ${model.generatedBy}`,
-        ),
-        MARGIN.left,
-        62,
-        {
-          width: CONTENT_WIDTH,
-          align: "right",
-        },
-      );
-
-    doc
-      .moveTo(MARGIN.left, 84)
-      .lineTo(MARGIN.left + CONTENT_WIDTH, 84)
-      .lineWidth(0.75)
-      .strokeColor(COLOURS.hairline)
-      .stroke();
-  }
-
-  /*
-   * The first page already exists by the time a listener could be
-   * attached, so its header is drawn by hand; every later page gets
-   * its header here.
-   */
-  doc.on("pageAdded", drawPageHeader);
-
-  drawPageHeader();
 
   let y = BODY_TOP;
 
@@ -472,49 +278,22 @@ export async function buildWeeklyInspectionPdf(
   y += 18;
 
   function drawUnitBand(unitName, continued) {
-    doc
-      .rect(MARGIN.left, y, CONTENT_WIDTH, 18)
-      .fill(INK);
-
-    doc
-      .font("Helvetica-Bold")
-      .fontSize(9.5)
-      .fillColor("#FFFFFF")
-      .text(
-        toPdfText(
-          continued
-            ? `${unitName} (continued)`
-            : unitName,
-        ),
-        MARGIN.left + 6,
-        y + 4.5,
-        { width: CONTENT_WIDTH - 12 },
-      );
-
-    y += 18;
+    y = drawBand(
+      doc,
+      y,
+      continued
+        ? `${unitName} (continued)`
+        : unitName,
+    );
   }
 
   function drawColumnHeader() {
-    doc
-      .rect(MARGIN.left, y, CONTENT_WIDTH, 18)
-      .fill(COLOURS.headerBand);
-
-    COLUMNS.forEach((column, index) => {
-      doc
-        .font("Helvetica-Bold")
-        .fontSize(7.5)
-        .fillColor(COLOURS.strong)
-        .text(
-          column.label.toUpperCase(),
-          COLUMN_X[index] + CELL_PADDING,
-          y + 5.5,
-          {
-            width: column.width - 2 * CELL_PADDING,
-          },
-        );
-    });
-
-    y += 18;
+    y = drawTableHeader(
+      doc,
+      y,
+      COLUMNS,
+      COLUMN_X,
+    );
   }
 
   /*
@@ -616,16 +395,7 @@ export async function buildWeeklyInspectionPdf(
   }
 
   function drawRule(isGroupEnd) {
-    doc
-      .moveTo(MARGIN.left, y)
-      .lineTo(MARGIN.left + CONTENT_WIDTH, y)
-      .lineWidth(isGroupEnd ? 1 : 0.5)
-      .strokeColor(
-        isGroupEnd
-          ? COLOURS.divider
-          : COLOURS.hairline,
-      )
-      .stroke();
+    drawSharedRule(doc, y, isGroupEnd);
   }
 
   model.units.forEach((unit) => {
@@ -637,7 +407,7 @@ export async function buildWeeklyInspectionPdf(
     unit.inspections.forEach((inspection) => {
       const rows = buildInspectionRows({
         ...inspection,
-        dueDay: model.dueDay,
+        dueDay,
       });
 
       rows.forEach((row, index) => {
@@ -876,57 +646,9 @@ export async function buildWeeklyInspectionPdf(
       .stroke();
   });
 
-  /* Footer, on every page once the total is known. */
-  const range = doc.bufferedPageRange();
-
-  for (let index = 0; index < range.count; index += 1) {
-    doc.switchToPage(range.start + index);
-
-    /*
-     * Writing below the bottom margin would make pdfkit add a page.
-     */
-    doc.page.margins.bottom = 0;
-
-    doc
-      .moveTo(MARGIN.left, PAGE_HEIGHT - 30)
-      .lineTo(
-        MARGIN.left + CONTENT_WIDTH,
-        PAGE_HEIGHT - 30,
-      )
-      .lineWidth(0.5)
-      .strokeColor(COLOURS.hairline)
-      .stroke();
-
-    doc
-      .font("Helvetica")
-      .fontSize(7.5)
-      .fillColor(COLOURS.subtle)
-      .text(
-        toPdfText(
-          `${footerLegal()} · ${BRAND.productName} · Weekly inspection report`,
-        ),
-        MARGIN.left,
-        PAGE_HEIGHT - 24,
-        {
-          width: CONTENT_WIDTH,
-          align: "left",
-          lineBreak: false,
-        },
-      );
-
-    doc.text(
-      `Page ${index + 1} of ${range.count}`,
-      MARGIN.left,
-      PAGE_HEIGHT - 24,
-      {
-        width: CONTENT_WIDTH,
-        align: "right",
-        lineBreak: false,
-      },
-    );
-  }
-
-  doc.end();
-
-  return finished;
+  return finishWithFooter(
+    doc,
+    finished,
+    "Weekly inspection report",
+  );
 }

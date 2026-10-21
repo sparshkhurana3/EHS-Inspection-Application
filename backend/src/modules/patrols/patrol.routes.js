@@ -18,8 +18,6 @@ import {
   createPatrol,
   getInspectionReport,
   getPlanningLookups,
-  getWeeklyInspectionReport,
-  getWeeklyReportWeeks,
   getRoster,
   updatePatrolAssignment,
   updateZoneAssignment,
@@ -30,7 +28,6 @@ import {
   createPatrolValidationRules,
   updatePatrolAssignmentValidationRules,
   updateZoneAssignmentValidationRules,
-  weeklyReportValidationRules,
 } from "./patrol.validator.js";
 
 import {
@@ -77,33 +74,6 @@ router.get(
   authenticate,
   authorize(...PLANNING_ROLES),
   getInspectionReport,
-);
-
-/*
- * The weeks the weekly PDF report can be downloaded for: those with at
- * least one audit at the officer's location. Declared before
- * /:patrolId/assignment so the literal path is never parsed as a
- * patrol id.
- */
-router.get(
-  "/weekly-report/weeks",
-  authenticate,
-  authorize(...PLANNING_ROLES),
-  getWeeklyReportWeeks,
-);
-
-/*
- * One week's inspection report as a branded PDF: every zone scheduled
- * at the officer's location, whether it was inspected, and its
- * observations and closures.
- */
-router.get(
-  "/weekly-report",
-  authenticate,
-  authorize(...PLANNING_ROLES),
-  weeklyReportValidationRules,
-  validate,
-  getWeeklyInspectionReport,
 );
 
 /*

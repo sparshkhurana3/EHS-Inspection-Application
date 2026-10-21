@@ -79,12 +79,12 @@ Which sign-in methods this deployment offers, so the sign-in page knows whether 
 When Entra is configured, `label` carries `ENTRA_BUTTON_LABEL` (default `"Login with Entra SSO"`).
 
 ### `GET /api/auth/entra/start` — no auth
-**A browser navigation, not a fetch.** `302` to Microsoft, carrying `state`, `nonce` and a PKCE S256 challenge. Optional `?redirectTo=` must be an app-relative path or it is discarded.
+**A browser navigation, not a fetch.** `302` to Microsoft, carrying `state`, `nonce` and a PKCE S256 challenge. Optional `?redirectTo=` must be an app-relative path or it is discarded. Optional `?origin=` is the address the browser is on (the sign-in button sends `window.location.origin`). It must be exactly `FRONTEND_ORIGIN` or one of `FRONTEND_ADDITIONAL_ORIGINS`. It decides the `redirect_uri` (`<origin>/api/auth/entra/callback`, or `ENTRA_REDIRECT_URI` for the primary) and is stored on the login session. A missing or unlisted value falls back to `FRONTEND_ORIGIN`, and an unlisted one is logged as a warning ([22](22-entra-app-proxy-plan.md)).
 
-Every failure — Entra not configured, Entra unreachable — is also a `302`, to `{FRONTEND_ORIGIN}/sign-in?ssoError=<message>`, because the browser is on this URL and cannot be shown JSON. 5xx detail is masked here rather than by `errorHandler`.
+Every failure — Entra not configured, Entra unreachable — is also a `302`, to `{origin}/sign-in?ssoError=<message>`, because the browser is on this URL and cannot be shown JSON. 5xx detail is masked here rather than by `errorHandler`.
 
 ### `GET /api/auth/entra/callback?code=&state=` — no auth
-**A browser navigation.** Where Entra returns the person. Redeems the code server-side with the client secret, verifies the ID token, provisions or links the account, rewrites its roles, then `302`s to `{FRONTEND_ORIGIN}/auth/entra/callback?code=<one-time code>&redirectTo=<path>`.
+**A browser navigation.** Where Entra returns the person. Redeems the code server-side with the client secret, verifies the ID token, provisions or links the account, rewrites its roles, then `302`s to `{origin}/auth/entra/callback?code=<one-time code>&redirectTo=<path>`, where `origin` is the one the sign-in started on (read back from the login session by `state`, and used again as the token request's `redirect_uri`). Error redirects go to the same origin, or to `FRONTEND_ORIGIN` when `state` is unknown.
 
 `state` is single-use: a replayed callback URL lands on `/sign-in?ssoError=…`. Entra's own refusals (`?error=access_denied`, a conditional access block) are turned into a readable message the same way.
 
@@ -314,29 +314,36 @@ Every route is scoped to the caller's own plant (`users.plant_id`); a caller wit
 ```
 Only the caller's plant: its active units and zones, each zone with its active areas in `display_order`. `users` is every active user at that plant, ordered by name, **the signed-in officer included** ([20](20-dashboard-assignment-editing-plan.md) D8): one list feeds both the auditor and the auditee choices, and the officer may be either. The only person rule anywhere is that one audit's auditor and auditee differ.
 
-### `GET /api/patrols/weekly-report/weeks`
-The weeks the weekly PDF report can be downloaded for. `PLANNING_ROLES`, scoped to the caller's own plant (`403 OFFICER_LOCATION_NOT_SET` when none). Only weeks with at least one non-cancelled audit appear, from 52 weeks before the current week up to and including it, newest first, so the client never offers an empty week and does no date arithmetic. Declared before `/:patrolId/assignment`.
+## Reports (`/api/reports`)
 
-```
-200 { "message", "location": { "name", "code" }, "currentWeekStart": "2026-10-19",
-      "weeks": [{ "weekStart", "weekEnd", "isoWeek", "isoYear", "zoneCount", "reportCount" }] }
-```
-`reportCount` is audits with a report filed, not zones.
+The weekly and yearly inspection reports ([23](23-reports-page-plan.md), which moved the weekly report here from `/api/patrols/weekly-report`). **EHS Officer only** (`REPORT_ROLES`; not `ADMIN`), scoped to the caller's own plant (`403 OFFICER_LOCATION_NOT_SET` when none). Built with `pdfkit` (`reports/weeklyInspectionPdf.js`, `yearlyInspectionPdf.js`, shared `pdfLayout.js`). Each report is built once as a raw model (ISO dates, codes, ready-made labels), returned as JSON for the Report page and handed to the PDF builder, so the screen and the PDF never disagree.
 
-### `GET /api/patrols/weekly-report?weekStart=YYYY-MM-DD`
-One week's inspection report as a branded Sona Comstar **PDF** (A4 landscape), built with `pdfkit` (`patrols/weeklyInspectionPdf.js`; [21](21-weekly-inspection-pdf-plan.md)). `PLANNING_ROLES`, scoped to the caller's own plant. Any date is moved to its Monday (Monday to Sunday, UTC).
+| Method and path | Query | Returns |
+|---|---|---|
+| `GET /api/reports/weekly/weeks` | – | `{ message, location, currentWeekStart, weeks: [{ weekStart, weekEnd, isoWeek, isoYear, zoneCount, reportCount }] }`. Weeks with at least one non-cancelled audit, 52 weeks back to the current week, newest first. `reportCount` is audits with a report, not zones |
+| `GET /api/reports/weekly` | `weekStart=YYYY-MM-DD` (moved to its Monday), **or** `isoYear=YYYY&isoWeek=N` | `{ message, report }`: `type`, `plant`, `weekStart`, `weekEnd`, `isoWeek`, `isoYear`, `dueDate`, `generatedAt`, `units[].inspections[]` (`patrolId`, `zoneId`, `zoneName`, `scheduledDate`, `auditorName`, `auditeeName`, `outcome` `NOT_DONE`/`NO_OBSERVATIONS`/`OBSERVATIONS`, `notYetDue`, `reportNumber`, `closureStatus`, `closureLabel`, `reviewComments`, `observations[]`) and `summary` |
+| `GET /api/reports/weekly/pdf` | the same | PDF `weekly-inspection-report-<plant>-<isoYear>-w<NN>.pdf` |
+| `GET /api/reports/yearly/years` | – | `{ message, location, currentYear, years: [{ year, scheduledCount, conductedCount }] }`, newest first, always including the current year |
+| `GET /api/reports/yearly` | `year=YYYY` | `{ message, report }`: `type`, `plant`, `year`, `fromDate`, `cutoffDate`, `isPartialYear`, `generatedAt`, `totals`, `units[]` (`totals`, `zones[]` with `totals` and `weeks[]`) |
+| `GET /api/reports/yearly/pdf` | `year` | PDF `yearly-inspection-report-<plant>-<year>.pdf` |
 
-Responds with `Content-Type: application/pdf`, `Content-Disposition: attachment; filename="weekly-inspection-report-<plant>-<isoYear>-w<NN>.pdf"`, `Access-Control-Expose-Headers: Content-Disposition` and `Cache-Control: no-store`.
+PDF responses carry `Content-Type: application/pdf`, `Content-Disposition: attachment`, `Access-Control-Expose-Headers: Content-Disposition` and `Cache-Control: no-store`. JSON reports are `no-store` too.
 
-Content: one table per unit, one block per audit scheduled that week (cancelled audits are left out). A red **Not done** cell when no observation report was filed (with "Due by Thu …" while Thursday has not passed), a green **Inspected · No observation to record** for a report closed with nothing to record, and a green **Inspected · N observations** followed by one row per observation with its area, category, risk, description, action plan, target date, evidence-photo count and the closure's status. The last page is a summary: zones to be inspected, inspected, not inspected, inspected with and without observations, risk and closure counts, and a by-unit table. Photographs are not embedded.
+**Weekly rules**: one block per non-cancelled audit scheduled in the Monday-to-Sunday week. Red **Not done** (with "Due by Thu …" while Thursday has not passed), green **Inspected · No observation to record** or **Inspected · N observations** with each observation, action plan, target date, evidence count and closure status. A zone with more than one audit that week counts as inspected only when every one has a report. No photographs.
+
+**Yearly rules**: 1 January to today (current year) or to 31 December (past year). Every active zone is listed; one with nothing scheduled is "Not scheduled" and left out of every percentage. `Totals` = `scheduled`, `conducted`, `notConducted`, `completionPercent` (conducted ÷ scheduled, rounded, `null` when nothing scheduled), `completionBand` (`COMPLETE` 100, `ON_TRACK` 75–99, `BEHIND` below 75), `observationReports` (reports with findings), `noObservationReports`, `observations` (items), `closuresApproved` (`APPROVED`), `closuresOpen` (every other closure), `zonesScheduled`, `zonesNotScheduled`. Unit and location totals are sums of their zones with the percentage recomputed from the sums.
 
 | Status | Code | When |
 |---|---|---|
-| 400 | `VALIDATION_ERROR` | `weekStart` is missing or not `YYYY-MM-DD` |
-| 400 | `INVALID_WEEK_START` | not a real calendar date |
+| 400 | `VALIDATION_ERROR` | `weekStart`, `isoYear`, `isoWeek` or `year` has the wrong shape |
+| 400 | `INVALID_WEEK_START` | not a real date, or no week given |
+| 400 | `INVALID_ISO_WEEK` | week 0 or above 53, week 53 of a 52-week year, or a year before 2000 |
 | 400 | `WEEK_NOT_STARTED` | the week begins after the current week |
+| 400 | `INVALID_YEAR` | `year` before 2000 |
+| 400 | `YEAR_NOT_STARTED` | `year` after the current year |
+| 403 | `INSUFFICIENT_PERMISSIONS` | the caller is not an EHS Officer |
 | 403 | `OFFICER_LOCATION_NOT_SET` | the account has no plant |
-| 404 | `NO_INSPECTIONS_IN_WEEK` | nothing was scheduled at the plant that week |
+| 404 | `NO_INSPECTIONS_IN_WEEK` | nothing was scheduled at the plant that week (a year with nothing is not a 404) |
 
 ### `GET /api/patrols/inspection-report`
 The zone-by-week inspection report as an `.xlsx` download, scoped to the officer's own plant and covering **the current year up to today**. Declared before `/:patrolId/assignment` so the literal path is never parsed as a patrol id.

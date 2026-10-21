@@ -1,7 +1,6 @@
 import {
   body,
   param,
-  query,
 } from "express-validator";
 
 /*
@@ -218,18 +217,4 @@ export const updateZoneAssignmentValidationRules = [
 
       return true;
     }),
-];
-
-/*
- * Only the shape is checked here; the service rejects an impossible day
- * such as 2026-02-30, moves the date to its Monday and refuses a week
- * that has not started, because Express 5's req.query does not keep
- * sanitised values.
- */
-export const weeklyReportValidationRules = [
-  query("weekStart")
-    .matches(/^\d{4}-\d{2}-\d{2}$/)
-    .withMessage(
-      "Week start must be a date in YYYY-MM-DD format.",
-    ),
 ];

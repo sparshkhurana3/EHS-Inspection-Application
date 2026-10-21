@@ -31,6 +31,14 @@ export const PLANNING_ROLES = Object.freeze([
   USER_ROLES.ADMIN,
 ]);
 
+/*
+ * Roles allowed to open the Report page (docs/23). The EHS Officer
+ * only: the requirement names them, and ADMIN usually has no plant.
+ */
+export const REPORT_ROLES = Object.freeze([
+  USER_ROLES.EHS_OFFICER,
+]);
+
 export function normalizeRole(role) {
   return String(role ?? "")
     .trim()

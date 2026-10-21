@@ -8,6 +8,7 @@ import {
 
 import {
   canPlanAudits,
+  canViewReports,
 } from "../constants/roles.js";
 
 import { BRAND } from "../brand/brand.js";
@@ -65,6 +66,7 @@ export default function Sidebar() {
   const { user } = useAuthenticatedUser();
 
   const showPlanLink = canPlanAudits(user);
+  const showReportLink = canViewReports(user);
 
   return (
     <aside className="app-sidebar">
@@ -96,6 +98,14 @@ export default function Sidebar() {
             label="Plan"
             path="/plan"
             icon="P"
+          />
+        )}
+
+        {showReportLink && (
+          <SidebarLink
+            label="Report"
+            path="/reports"
+            icon="R"
           />
         )}
       </nav>

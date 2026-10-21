@@ -16,6 +16,8 @@ import closureRoutes
   from "./modules/closures/closure.routes.js";
 import patrolRoutes
   from "./modules/patrols/patrol.routes.js";
+import reportRoutes
+  from "./modules/reports/reports.routes.js";
 
 import {
   errorHandler,
@@ -30,7 +32,12 @@ app.use(helmet());
 
 app.use(
   cors({
-    origin: environment.frontendOrigin,
+    /*
+     * Every public address of this deployment: FRONTEND_ORIGIN and any
+     * in FRONTEND_ADDITIONAL_ORIGINS, such as the Entra application
+     * proxy URL (docs/22).
+     */
+    origin: environment.frontendOrigins,
     methods: [
       "GET",
       "POST",
@@ -102,6 +109,11 @@ app.use(
 app.use(
   "/api/patrols",
   patrolRoutes,
+);
+
+app.use(
+  "/api/reports",
+  reportRoutes,
 );
 
 app.use(notFoundHandler);

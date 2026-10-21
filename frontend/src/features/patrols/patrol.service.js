@@ -103,30 +103,3 @@ export function fetchInspectionReport() {
     { method: "GET" },
   );
 }
-
-/**
- * The weeks a weekly report can be downloaded for, newest first. The
- * server decides which weeks exist, so the client does no date
- * arithmetic.
- */
-export function fetchWeeklyReportWeeks() {
-  return apiRequest(
-    "/patrols/weekly-report/weeks",
-    { method: "GET" },
-  );
-}
-
-/**
- * One week's inspection report as a PDF, fetched as a blob for the same
- * reason as fetchInspectionReport.
- */
-export function fetchWeeklyInspectionReport(
-  weekStart,
-) {
-  return apiBlobRequest(
-    `/patrols/weekly-report?weekStart=${encodeURIComponent(
-      weekStart,
-    )}`,
-    { method: "GET" },
-  );
-}

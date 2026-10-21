@@ -15,11 +15,13 @@ import DashboardPage from "../features/dashboard/DashboardPage.jsx";
 import ObservationPage from "../features/observations/ObservationPage.jsx";
 import ClosurePage from "../features/closures/ClosurePage.jsx";
 import PlanningPage from "../features/patrols/PlanningPage.jsx";
+import ReportsPage from "../features/reports/ReportsPage.jsx";
 
 import RequireRole from "./RequireRole.jsx";
 
 import {
   PLANNING_ROLES,
+  REPORT_ROLES,
 } from "../constants/roles.js";
 
 export default function AppRoutes() {
@@ -83,6 +85,16 @@ export default function AppRoutes() {
           element={
             <RequireRole roles={PLANNING_ROLES}>
               <PlanningPage />
+            </RequireRole>
+          }
+        />
+
+        {/* Reports are EHS Officer work; the API enforces it too. */}
+        <Route
+          path="/reports"
+          element={
+            <RequireRole roles={REPORT_ROLES}>
+              <ReportsPage />
             </RequireRole>
           }
         />
