@@ -132,6 +132,10 @@ Decided in [20](20-dashboard-assignment-editing-plan.md) D8–D10.
 - **They may approve a closure on which they are the auditee.** A business decision; segregation of duties was considered and declined. The approval panel shows "You are the auditee of this audit, so approving it signs off your own action plans." and the queue marks the row "(you)". Approval routing is unchanged, so such a closure is in the officer's own queue.
 - **Their dashboard prompts them.** Management users get their own `nextAudit`, shown above the week card only when they have a task this week, and the calendar marks their own patrols "Auditor"/"Auditee" instead of "Assigned".
 
+## The weekly inspection report
+
+`GET /api/patrols/weekly-report` ([21](21-weekly-inspection-pdf-plan.md)) lists every audit scheduled at the officer's plant in one Monday-to-Sunday week. **Inspected** means an observation report was filed, the same test the dashboard metrics and the spreadsheet report use, so "no observation to record" counts as inspected. **Not done** is red. A zone with more than one audit that week counts as inspected in the summary only when every one of them has a report, and as **with observations** when any report has findings. An audit whose Thursday deadline has not yet passed still reads "Not done", with "Due by Thu …" under it.
+
 ## Who sees what, and when
 
 | Step | Query that surfaces it | Condition |

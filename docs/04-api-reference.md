@@ -314,6 +314,30 @@ Every route is scoped to the caller's own plant (`users.plant_id`); a caller wit
 ```
 Only the caller's plant: its active units and zones, each zone with its active areas in `display_order`. `users` is every active user at that plant, ordered by name, **the signed-in officer included** ([20](20-dashboard-assignment-editing-plan.md) D8): one list feeds both the auditor and the auditee choices, and the officer may be either. The only person rule anywhere is that one audit's auditor and auditee differ.
 
+### `GET /api/patrols/weekly-report/weeks`
+The weeks the weekly PDF report can be downloaded for. `PLANNING_ROLES`, scoped to the caller's own plant (`403 OFFICER_LOCATION_NOT_SET` when none). Only weeks with at least one non-cancelled audit appear, from 52 weeks before the current week up to and including it, newest first, so the client never offers an empty week and does no date arithmetic. Declared before `/:patrolId/assignment`.
+
+```
+200 { "message", "location": { "name", "code" }, "currentWeekStart": "2026-10-19",
+      "weeks": [{ "weekStart", "weekEnd", "isoWeek", "isoYear", "zoneCount", "reportCount" }] }
+```
+`reportCount` is audits with a report filed, not zones.
+
+### `GET /api/patrols/weekly-report?weekStart=YYYY-MM-DD`
+One week's inspection report as a branded Sona Comstar **PDF** (A4 landscape), built with `pdfkit` (`patrols/weeklyInspectionPdf.js`; [21](21-weekly-inspection-pdf-plan.md)). `PLANNING_ROLES`, scoped to the caller's own plant. Any date is moved to its Monday (Monday to Sunday, UTC).
+
+Responds with `Content-Type: application/pdf`, `Content-Disposition: attachment; filename="weekly-inspection-report-<plant>-<isoYear>-w<NN>.pdf"`, `Access-Control-Expose-Headers: Content-Disposition` and `Cache-Control: no-store`.
+
+Content: one table per unit, one block per audit scheduled that week (cancelled audits are left out). A red **Not done** cell when no observation report was filed (with "Due by Thu …" while Thursday has not passed), a green **Inspected · No observation to record** for a report closed with nothing to record, and a green **Inspected · N observations** followed by one row per observation with its area, category, risk, description, action plan, target date, evidence-photo count and the closure's status. The last page is a summary: zones to be inspected, inspected, not inspected, inspected with and without observations, risk and closure counts, and a by-unit table. Photographs are not embedded.
+
+| Status | Code | When |
+|---|---|---|
+| 400 | `VALIDATION_ERROR` | `weekStart` is missing or not `YYYY-MM-DD` |
+| 400 | `INVALID_WEEK_START` | not a real calendar date |
+| 400 | `WEEK_NOT_STARTED` | the week begins after the current week |
+| 403 | `OFFICER_LOCATION_NOT_SET` | the account has no plant |
+| 404 | `NO_INSPECTIONS_IN_WEEK` | nothing was scheduled at the plant that week |
+
 ### `GET /api/patrols/inspection-report`
 The zone-by-week inspection report as an `.xlsx` download, scoped to the officer's own plant and covering **the current year up to today**. Declared before `/:patrolId/assignment` so the literal path is never parsed as a patrol id.
 

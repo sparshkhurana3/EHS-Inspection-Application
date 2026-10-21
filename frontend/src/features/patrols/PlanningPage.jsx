@@ -5,14 +5,17 @@ import { formatDate } from "../../lib/errorMessage.js";
 
 import PatrolForm from "./PatrolForm.jsx";
 import RosterUploadPanel from "./RosterUploadPanel.jsx";
+import WeeklyReportPanel from "./WeeklyReportPanel.jsx";
 import useInspectionReport from "./useInspectionReport.js";
 import usePatrols from "./usePatrols.js";
 import useRoster from "./useRoster.js";
+import useWeeklyReport from "./useWeeklyReport.js";
 
 export default function PlanningPage() {
   const planning = usePatrols();
   const roster = useRoster();
   const report = useInspectionReport();
+  const weeklyReport = useWeeklyReport();
 
   if (planning.loading) {
     return (
@@ -76,6 +79,21 @@ export default function PlanningPage() {
         audited it, and whether each week&apos;s
         inspection was carried out.
       </p>
+
+      <WeeklyReportPanel
+        locationName={planning.location.name}
+        weeks={weeklyReport.weeks}
+        selectedWeekStart={
+          weeklyReport.selectedWeekStart
+        }
+        loading={weeklyReport.loading}
+        downloading={weeklyReport.downloading}
+        error={weeklyReport.error}
+        onSelectWeek={
+          weeklyReport.setSelectedWeekStart
+        }
+        onDownload={weeklyReport.download}
+      />
 
       <RosterUploadPanel
         roster={roster.roster}

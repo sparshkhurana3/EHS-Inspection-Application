@@ -1161,3 +1161,257 @@ export async function findZoneWeekInspectionStatus(
     conductedCount: row.conducted_count,
   }));
 }
+
+/**
+ * The inspection weeks at a plant, newest first, for the weekly
+ * report's week picker. Only weeks that had a non-cancelled audit
+ * appear, so the officer is never offered an empty report.
+ *
+ * `reportCount` is audits with a report filed, not zones, so it is a
+ * hint for the picker and not the report's own zone-level summary.
+ */
+export async function findInspectionWeeks(
+  {
+    plantId,
+    fromDate,
+    toDate,
+  },
+  client = databasePool,
+) {
+  const result = await client.query(
+    `
+      SELECT
+        TO_CHAR(
+          DATE_TRUNC(
+            'week',
+            patrol.scheduled_date
+          ),
+          'YYYY-MM-DD'
+        ) AS week_start,
+
+        COUNT(DISTINCT patrol.zone_id)::INTEGER
+          AS zone_count,
+
+        COUNT(report.id)::INTEGER
+          AS report_count
+
+      FROM patrols AS patrol
+
+      JOIN units AS unit_record
+        ON unit_record.id = patrol.unit_id
+
+      LEFT JOIN observation_reports AS report
+        ON report.patrol_id = patrol.id
+
+      WHERE
+        unit_record.plant_id = $1
+        AND patrol.scheduled_date >= $2::DATE
+        AND patrol.scheduled_date <= $3::DATE
+        AND patrol.status <> 'CANCELLED'
+
+      GROUP BY week_start
+
+      ORDER BY week_start DESC
+    `,
+    [plantId, fromDate, toDate],
+  );
+
+  return result.rows.map((row) => ({
+    weekStart: row.week_start,
+    zoneCount: row.zone_count,
+    reportCount: row.report_count,
+  }));
+}
+
+/**
+ * Every non-cancelled audit at a plant in one week, with its report and
+ * closure header when they exist. The observations themselves come from
+ * findReportItemsForReport so a report with ten of them does not
+ * multiply this result.
+ */
+export async function findWeekPatrolsForReport(
+  {
+    plantId,
+    weekStart,
+    weekEnd,
+  },
+  client = databasePool,
+) {
+  const result = await client.query(
+    `
+      SELECT
+        patrol.id AS patrol_id,
+
+        TO_CHAR(
+          patrol.scheduled_date,
+          'YYYY-MM-DD'
+        ) AS scheduled_date,
+
+        unit_record.id AS unit_id,
+        unit_record.unit_number,
+        unit_record.name AS unit_name,
+
+        zone_record.id AS zone_id,
+        zone_record.zone_number,
+        zone_record.name AS zone_name,
+
+        auditor.full_name AS auditor_name,
+        auditee.full_name AS auditee_name,
+
+        report.id AS report_id,
+        report.report_number,
+        report.no_observations,
+
+        closure.id AS closure_id,
+        closure.status AS closure_status,
+        closure.approval_iteration,
+        closure.review_comments,
+
+        TO_CHAR(
+          closure.approved_at AT TIME ZONE 'UTC',
+          'YYYY-MM-DD'
+        ) AS approved_on,
+
+        reviewer.full_name AS reviewer_name
+
+      FROM patrols AS patrol
+
+      JOIN units AS unit_record
+        ON unit_record.id = patrol.unit_id
+
+      JOIN zones AS zone_record
+        ON zone_record.id = patrol.zone_id
+
+      JOIN users AS auditor
+        ON auditor.id = patrol.auditor_id
+
+      JOIN users AS auditee
+        ON auditee.id = patrol.auditee_id
+
+      LEFT JOIN observation_reports AS report
+        ON report.patrol_id = patrol.id
+
+      LEFT JOIN closure_requests AS closure
+        ON closure.observation_report_id = report.id
+
+      LEFT JOIN users AS reviewer
+        ON reviewer.id = closure.reviewed_by
+
+      WHERE
+        unit_record.plant_id = $1
+        AND unit_record.is_active
+        AND zone_record.is_active
+        AND patrol.scheduled_date >= $2::DATE
+        AND patrol.scheduled_date <= $3::DATE
+        AND patrol.status <> 'CANCELLED'
+
+      ORDER BY
+        unit_record.unit_number NULLS LAST,
+        unit_record.name,
+        zone_record.zone_number NULLS LAST,
+        zone_record.name,
+        patrol.scheduled_date,
+        patrol.id
+    `,
+    [plantId, weekStart, weekEnd],
+  );
+
+  return result.rows.map((row) => ({
+    patrolId: Number(row.patrol_id),
+    scheduledDate: row.scheduled_date,
+    unitId: Number(row.unit_id),
+    unitNumber: row.unit_number,
+    unitName: row.unit_name,
+    zoneId: Number(row.zone_id),
+    zoneNumber: row.zone_number,
+    zoneName: row.zone_name,
+    auditorName: row.auditor_name,
+    auditeeName: row.auditee_name,
+    reportId:
+      row.report_id === null
+        ? null
+        : Number(row.report_id),
+    reportNumber: row.report_number ?? null,
+    noObservations:
+      row.no_observations === true,
+    closureStatus: row.closure_status ?? null,
+    approvalIteration:
+      row.approval_iteration ?? null,
+    reviewComments: row.review_comments ?? null,
+    approvedOn: row.approved_on ?? null,
+    reviewerName: row.reviewer_name ?? null,
+  }));
+}
+
+/**
+ * The observations of the given reports, each with its closure item's
+ * action plan, target date and evidence count, in report order.
+ */
+export async function findReportItemsForReport(
+  { reportIds },
+  client = databasePool,
+) {
+  if (!reportIds || reportIds.length === 0) {
+    return [];
+  }
+
+  const result = await client.query(
+    `
+      SELECT
+        item.observation_report_id,
+        item.sequence_number,
+        item.category,
+        item.risk_category,
+        item.description,
+
+        COALESCE(
+          zone_area.name::TEXT,
+          item.observation_location
+        ) AS area_name,
+
+        closure_item.action_plan,
+
+        TO_CHAR(
+          closure_item.target_date,
+          'YYYY-MM-DD'
+        ) AS target_date,
+
+        (
+          SELECT COUNT(*)::INTEGER
+          FROM closure_item_evidence AS evidence
+          WHERE
+            evidence.closure_item_id =
+              closure_item.id
+        ) AS evidence_count
+
+      FROM observation_items AS item
+
+      LEFT JOIN zone_areas AS zone_area
+        ON zone_area.id = item.zone_area_id
+
+      LEFT JOIN closure_items AS closure_item
+        ON closure_item.observation_item_id = item.id
+
+      WHERE
+        item.observation_report_id =
+          ANY($1::BIGINT[])
+
+      ORDER BY
+        item.observation_report_id,
+        item.sequence_number
+    `,
+    [reportIds],
+  );
+
+  return result.rows.map((row) => ({
+    reportId: Number(row.observation_report_id),
+    sequenceNumber: row.sequence_number,
+    category: row.category,
+    riskCategory: row.risk_category,
+    description: row.description,
+    areaName: row.area_name ?? null,
+    actionPlan: row.action_plan ?? null,
+    targetDate: row.target_date ?? null,
+    evidenceCount: row.evidence_count ?? 0,
+  }));
+}

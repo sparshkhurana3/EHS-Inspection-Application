@@ -160,3 +160,66 @@ export async function getInspectionReport(
     next(error);
   }
 }
+
+export async function getWeeklyReportWeeks(
+  req,
+  res,
+  next,
+) {
+  try {
+    const result =
+      await patrolService.getWeeklyReportWeeks({
+        userId: req.user.id,
+      });
+
+    res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getWeeklyInspectionReport(
+  req,
+  res,
+  next,
+) {
+  try {
+    const report =
+      await patrolService
+        .getWeeklyInspectionReport({
+          userId: req.user.id,
+          generatedBy:
+            req.user.fullName ??
+            req.user.username,
+          weekStart: req.query.weekStart,
+        });
+
+    res.setHeader(
+      "Content-Type",
+      "application/pdf",
+    );
+
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${report.fileName}"`,
+    );
+
+    /*
+     * Same as the spreadsheet report: apiClient can only read a header
+     * the response exposes.
+     */
+    res.setHeader(
+      "Access-Control-Expose-Headers",
+      "Content-Disposition",
+    );
+
+    res.setHeader(
+      "Cache-Control",
+      "no-store",
+    );
+
+    res.status(200).send(report.buffer);
+  } catch (error) {
+    next(error);
+  }
+}
