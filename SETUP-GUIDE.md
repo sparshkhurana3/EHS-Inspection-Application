@@ -173,6 +173,7 @@ in chapters 7 and 10):
 | `POSTGRES_PASSWORD` | A long random value: `openssl rand -base64 32` |
 | `JWT_SECRET` | A long random value: `openssl rand -base64 48`. Changing it later signs everybody out. |
 | `FRONTEND_ORIGIN` | `https://ehs.contoso.com` — your address, `https://`, no trailing slash. Add `:port` only if `HTTPS_PORT` is not 443. |
+| `FRONTEND_ADDITIONAL_ORIGINS` | Empty, unless staff also reach the app at another address, such as an Entra application proxy URL (§11.5). Comma-separated, same form as `FRONTEND_ORIGIN`. |
 | `HTTPS_PORT` | `443` |
 | `TLS_CERT_DIR` | `./certs` |
 
@@ -709,10 +710,21 @@ On a PC: the Start menu or Edge favourite → the same.
 
 If staff must use the app away from the company network, publish it
 with **Microsoft Entra application proxy** (Entra ID P1): install a
-private network connector on a Windows server inside the network, add
-the app as an **on-premises application** with the **same external URL
-as `FRONTEND_ORIGIN`** (custom domain, split-brain DNS), and keep the
-redirect URI in chapter 7 unchanged. Be aware:
+private network connector on a Windows server inside the network and add
+the app as an **on-premises application**. There are two ways to name
+it:
+
+- **A different external address** (the default `…msappproxy.net`
+  domain, for example `https://sonaehsdriveline-sonagroup.msappproxy.net`).
+  PCs keep using `FRONTEND_ORIGIN`, phones use the proxy address. Put the
+  proxy address in `FRONTEND_ADDITIONAL_ORIGINS` and register its
+  callback on the app registration. Follow
+  **[ENTRA-APP-PROXY.md](ENTRA-APP-PROXY.md)** step by step.
+- **The same address inside and outside** (a custom domain on the proxy
+  with split-brain DNS, equal to `FRONTEND_ORIGIN`). Nothing changes in
+  `.env` or in the redirect URIs from chapter 7.
+
+Either way, be aware:
 
 - The proxy is an extra network hop. The app's sign-in rate limits then
   count everyone coming through the proxy as one address (20 password
@@ -720,6 +732,8 @@ redirect URI in chapter 7 unchanged. Be aware:
   change. Plan this with whoever maintains the app before enabling it.
 - Uploads over a slow mobile link must complete within the proxy's
   backend timeout (85 s, or 180 s with "Long").
+- Publish at the root of the external address. A path such as `/ehs/`
+  breaks the app.
 - With Entra pre-authentication people sign in at the proxy and again in
   the app; the second is normally silent.
 
@@ -733,6 +747,7 @@ VPN is the simpler alternative if you already run one for phones.
 - [ ] Nothing answers on `http://<address>`
 - [ ] `/api/auth/providers` shows Entra enabled and sign-up closed
 - [ ] A real user signs in with Microsoft; an EHS Officer lands on the officer dashboard
+- [ ] If the app is published through Entra application proxy: a phone off the company network signs in with Microsoft at the proxy address and lands on the dashboard there (ENTRA-APP-PROXY.md step 4)
 - [ ] Both break-glass accounts sign in; passwords are in the safe
 - [ ] Every plant, unit, zone and area is loaded; every zone has areas
 - [ ] Every rostered person is imported with a plant (`list-users`)

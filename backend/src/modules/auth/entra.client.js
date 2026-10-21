@@ -173,6 +173,7 @@ export async function buildAuthorizationUrl({
   state,
   nonce,
   codeChallenge,
+  redirectUri,
 }) {
   const entra = requireEntra();
   const document = await discover();
@@ -193,7 +194,7 @@ export async function buildAuthorizationUrl({
 
   url.searchParams.set(
     "redirect_uri",
-    entra.redirectUri,
+    redirectUri,
   );
 
   url.searchParams.set(
@@ -229,6 +230,7 @@ export async function buildAuthorizationUrl({
 async function redeemAuthorizationCode({
   code,
   codeVerifier,
+  redirectUri,
 }) {
   const entra = requireEntra();
   const document = await discover();
@@ -238,7 +240,11 @@ async function redeemAuthorizationCode({
     client_secret: entra.clientSecret,
     grant_type: "authorization_code",
     code,
-    redirect_uri: entra.redirectUri,
+    /*
+     * Must be the redirect URI the authorization request sent, which
+     * depends on the address the sign-in started on (docs/22).
+     */
+    redirect_uri: redirectUri,
     code_verifier: codeVerifier,
     scope: entra.scopes,
   });
@@ -397,11 +403,13 @@ export async function resolveIdentity({
   code,
   codeVerifier,
   nonce,
+  redirectUri,
 }) {
   const tokens =
     await redeemAuthorizationCode({
       code,
       codeVerifier,
+      redirectUri,
     });
 
   return verifyIdentityToken({

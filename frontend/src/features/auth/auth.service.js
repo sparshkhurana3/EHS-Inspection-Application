@@ -72,7 +72,16 @@ export function fetchAuthProviders() {
  * Microsoft, which only the browser can follow.
  */
 export function buildEntraSignInUrl() {
-  return `${API_BASE_URL}/auth/entra/start`;
+  /*
+   * The browser tells the server which of the deployment's addresses
+   * it is on (the company network, or the Entra application proxy), so
+   * Microsoft sends it back to the same one (docs/22).
+   */
+  const query = new URLSearchParams({
+    origin: window.location.origin,
+  });
+
+  return `${API_BASE_URL}/auth/entra/start?${query.toString()}`;
 }
 
 /**

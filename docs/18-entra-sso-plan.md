@@ -1,5 +1,7 @@
 # Microsoft Entra ID single sign-on
 
+> **Extended by [22](22-entra-app-proxy-plan.md):** the redirect URI is now per public address (`FRONTEND_ORIGIN` plus `FRONTEND_ADDITIONAL_ORIGINS`), so sign-in also works through Entra application proxy.
+
 **Status: implemented.** Entra ID is the primary authentication and
 authorization source; username and password sign-in is retained as a
 failsafe. The administrator-facing setup instructions are in

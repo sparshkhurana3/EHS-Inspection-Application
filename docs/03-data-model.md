@@ -45,7 +45,7 @@ Unique on `LOWER(username)` and `LOWER(email)`. The `ENTRA` value reserves Micro
 
 **`authentication_events`** — audit log written on every signup, login, and failed login, by both sign-in routes: `user_id` (nullable), `username_attempted`, `event_type` (`SIGNUP` | `LOGIN` | `LOGOUT` | `LOGIN_FAILURE`), `success`, `ip_address` (`INET`), `user_agent`, `event_timestamp`. `LOGOUT` is never written because logout is client-side. An Entra sign-in writes `SIGNUP` on the round that provisions the account and `LOGIN` thereafter.
 
-**`entra_login_sessions`** (migration 017) — one short-lived row per SSO attempt, holding what has to survive the browser's trip to Microsoft: `state` (unique), `nonce`, `code_verifier` (PKCE), `redirect_to`, then `exchange_code_hash` (unique, SHA-256 of the one-time handoff code), `user_id`, `authorized_at`, `consumed_at`, `expires_at`.
+**`entra_login_sessions`** (migration 017) — one short-lived row per SSO attempt, holding what has to survive the browser's trip to Microsoft: `state` (unique), `nonce`, `code_verifier` (PKCE), `redirect_to`, `public_origin` (migration 019: the address the sign-in started on when it is not `FRONTEND_ORIGIN`, else `NULL`; [22](22-entra-app-proxy-plan.md)), then `exchange_code_hash` (unique, SHA-256 of the one-time handoff code), `user_id`, `authorized_at`, `consumed_at`, `expires_at`.
 
 It is a queue of in-flight sign-ins, not a session store — rows live ten minutes, are single-use, and are pruned whenever a sign-in starts. `code_verifier` is blanked the moment the row is claimed, and the handoff code is only ever stored hashed, so read access to this table yields nothing usable. See [18](18-entra-sso-plan.md).
 

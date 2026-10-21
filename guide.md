@@ -116,6 +116,11 @@ Rules that trip people up:
   https://ehs.contoso.com/api/auth/entra/callback
   https://localhost/api/auth/entra/callback
   ```
+- If staff also reach the app through **Microsoft Entra application
+  proxy** at a different address (for example
+  `https://sonaehsdriveline-sonagroup.msappproxy.net`), add that
+  address's callback too. The server must list it as well; see
+  [ENTRA-APP-PROXY.md](ENTRA-APP-PROXY.md).
 - Except for `localhost`, Entra requires `https`.
 
 On the same page:
@@ -260,10 +265,15 @@ ENTRA_CLIENT_ID=<Application (client) ID from step 1>
 ENTRA_CLIENT_SECRET=<the secret Value from step 4>
 ```
 
-The redirect URI the app sends is `FRONTEND_ORIGIN` followed by
-`/api/auth/entra/callback`, which must be one of the URIs registered in
-step 3, character for character. Only if the registered address has to
-differ, set `ENTRA_REDIRECT_URI` to it.
+The redirect URI the app sends is the address the person is signing in
+on followed by `/api/auth/entra/callback`, which must be one of the
+URIs registered in step 3, character for character. For the main
+address that is `FRONTEND_ORIGIN`; any other address, such as an
+application proxy URL, must also be listed in
+`FRONTEND_ADDITIONAL_ORIGINS` (see
+[ENTRA-APP-PROXY.md](ENTRA-APP-PROXY.md)). Only if the registered address
+for `FRONTEND_ORIGIN` has to differ, set `ENTRA_REDIRECT_URI` to it; it
+never applies to the additional addresses.
 
 Then apply the change. `.env` is read when the container is created,
 so a plain `docker compose restart` does **not** pick it up:
@@ -384,7 +394,8 @@ see it.
 
 | What you see | What it means |
 |---|---|
-| `AADSTS50011` redirect URI mismatch | Step 3's URI and `FRONTEND_ORIGIN` + `/api/auth/entra/callback` (or `ENTRA_REDIRECT_URI`) differ. Compare character by character — usually a trailing slash, a port, or `http` against `https`. |
+| `AADSTS50011` redirect URI mismatch | Step 3's URI and the address being signed in on + `/api/auth/entra/callback` (or `ENTRA_REDIRECT_URI` for `FRONTEND_ORIGIN`) differ. Compare character by character — usually a trailing slash, a port, or `http` against `https`. On an application proxy address, the proxy's callback is not registered ([ENTRA-APP-PROXY.md](ENTRA-APP-PROXY.md)). |
+| After signing in, the browser goes to the internal address instead of the proxy address | The server does not list the proxy address in `FRONTEND_ADDITIONAL_ORIGINS`. The backend log names the address it refused. See [ENTRA-APP-PROXY.md](ENTRA-APP-PROXY.md). |
 | `AADSTS50105` user not assigned | Assignment is required (step 6) and this person is not assigned, directly or through a group they are a direct member of. |
 | `AADSTS7000215` invalid client secret | The secret value is wrong. Copy the *Value*, not the *Secret ID* (step 4). |
 | `AADSTS7000222` expired client secret | Create a new secret (step 4), update `.env`, `docker compose up -d`. |

@@ -3,7 +3,9 @@ import {
 } from "../../config/database.js";
 
 import {
+  entraRedirectUriFor,
   environment,
+  resolvePublicOrigin,
 } from "../../config/environment.js";
 
 import {
@@ -111,8 +113,30 @@ function requireEnabled() {
 
 export async function startLogin({
   redirectTo,
+  origin,
 } = {}) {
   requireEnabled();
+
+  /*
+   * The address the browser is on: the company network's
+   * FRONTEND_ORIGIN, or another configured one such as the Entra
+   * application proxy URL. Microsoft must send the browser back to the
+   * same address, or a phone off the network ends up at one it cannot
+   * reach (docs/22).
+   */
+  const {
+    origin: publicOrigin,
+    accepted,
+  } = resolvePublicOrigin(origin);
+
+  if (!accepted) {
+    logger.warn(
+      "Entra sign-in started from an origin that is not configured; using FRONTEND_ORIGIN. Add it to FRONTEND_ADDITIONAL_ORIGINS if it is a real address of this deployment.",
+      {
+        origin: String(origin).slice(0, 200),
+      },
+    );
+  }
 
   const state = createRandomToken();
   const nonce = createRandomToken();
@@ -131,6 +155,8 @@ export async function startLogin({
       state,
       nonce,
       codeChallenge,
+      redirectUri:
+        entraRedirectUriFor(publicOrigin),
     });
 
   await entraRepository.createLoginSession({
@@ -139,6 +165,12 @@ export async function startLogin({
     codeVerifier,
     redirectTo:
       sanitizeRedirectPath(redirectTo),
+    /* NULL stands for FRONTEND_ORIGIN. */
+    publicOrigin:
+      publicOrigin ===
+      environment.frontendOrigin
+        ? null
+        : publicOrigin,
     expiresAt: new Date(
       Date.now() +
         LOGIN_SESSION_TTL_MILLISECONDS,
@@ -448,10 +480,23 @@ export async function completeCallback({
     );
   }
 
+  /*
+   * A row from before docs/22 has no origin, and an origin removed from
+   * the configuration since the sign-in started is no longer trusted;
+   * both fall back to FRONTEND_ORIGIN.
+   */
+  const publicOrigin =
+    resolvePublicOrigin(
+      loginSession.publicOrigin ??
+        undefined,
+    ).origin;
+
   const claims = await resolveIdentity({
     code,
     codeVerifier: loginSession.codeVerifier,
     nonce: loginSession.nonce,
+    redirectUri:
+      entraRedirectUriFor(publicOrigin),
   });
 
   const exchangeCode = createRandomToken();
@@ -544,7 +589,44 @@ export async function completeCallback({
     },
   );
 
-  return { exchangeCode, redirectTo };
+  return {
+    exchangeCode,
+    redirectTo,
+    publicOrigin,
+  };
+}
+
+/**
+ * The public origin the sign-in carrying this `state` started on, for
+ * the callback's error redirects. Falls back to FRONTEND_ORIGIN for a
+ * missing or unknown state, a failed lookup, or an origin that is no
+ * longer configured. Never throws: it runs on the way to an error page.
+ */
+export async function findOriginForState(state) {
+  if (
+    typeof state !== "string" ||
+    state.length === 0 ||
+    state.length > 128
+  ) {
+    return environment.frontendOrigin;
+  }
+
+  try {
+    const storedOrigin =
+      await entraRepository
+        .findLoginSessionOriginByState(state);
+
+    return resolvePublicOrigin(
+      storedOrigin ?? undefined,
+    ).origin;
+  } catch (error) {
+    logger.warn(
+      "Could not look up the origin of an Entra sign-in; using FRONTEND_ORIGIN.",
+      { reason: error.message },
+    );
+
+    return environment.frontendOrigin;
+  }
 }
 
 /**

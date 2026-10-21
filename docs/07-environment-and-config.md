@@ -36,7 +36,8 @@ Read once in `backend/src/config/environment.js` via `dotenv`; the object is fro
 | `JWT_SECRET` | **yes** | — | HS256 signing of access tokens |
 | `JWT_EXPIRES_IN` | no | `8h` | token lifetime (jsonwebtoken format) |
 | `PASSWORD_SALT_ROUNDS` | no | `12` | bcryptjs cost |
-| `FRONTEND_ORIGIN` | no | `http://localhost:5173` | CORS `origin` (single value, no credentials); also the host the SSO redirects return to |
+| `FRONTEND_ORIGIN` | no | `http://localhost:5173` | The primary public address: `https://` origin, no path (plain `http` only for `localhost`); the boot fails otherwise. In the CORS `origin` list (no credentials), and where SSO returns a browser that started here or named no allowed origin |
+| `FRONTEND_ADDITIONAL_ORIGINS` | no | — | Comma-separated further `https://` origins of the same deployment, such as the Entra application proxy URL. Validated like `FRONTEND_ORIGIN`, added to the CORS list, and SSO started on one of them returns to it with redirect URI `<origin>/api/auth/entra/callback`, which must be registered ([22](22-entra-app-proxy-plan.md), [ENTRA-APP-PROXY.md](../ENTRA-APP-PROXY.md)) |
 
 ### Microsoft Entra ID single sign-on
 

@@ -1,5 +1,6 @@
 import {
   environment,
+  resolvePublicOrigin,
 } from "../../config/environment.js";
 
 import {
@@ -110,7 +111,11 @@ export function authProviders(req, res) {
  * on a page they can read and act on. That means errorHandler is
  * bypassed here and masking 5xx detail is this function's job.
  */
-function redirectToSignIn(res, error) {
+function redirectToSignIn(
+  res,
+  error,
+  origin = environment.frontendOrigin,
+) {
   const statusCode =
     error.statusCode ?? 500;
 
@@ -131,7 +136,7 @@ function redirectToSignIn(res, error) {
 
   const target = new URL(
     "/sign-in",
-    environment.frontendOrigin,
+    origin,
   );
 
   target.searchParams.set(
@@ -147,14 +152,24 @@ export async function entraStart(
   res,
 ) {
   try {
+    /*
+     * `origin` is the address the browser is on (docs/22). It is
+     * checked against the configured list, never trusted as is.
+     */
     const authorizationUrl =
       await entraService.startLogin({
         redirectTo: req.query.redirectTo,
+        origin: req.query.origin,
       });
 
     res.redirect(302, authorizationUrl);
   } catch (error) {
-    redirectToSignIn(res, error);
+    redirectToSignIn(
+      res,
+      error,
+      resolvePublicOrigin(req.query.origin)
+        .origin,
+    );
   }
 }
 
@@ -162,7 +177,18 @@ export async function entraCallback(
   req,
   res,
 ) {
+  /*
+   * Every redirect from here goes back to the address the sign-in
+   * started on, which the login session remembers (docs/22).
+   */
+  let origin = environment.frontendOrigin;
+
   try {
+    origin =
+      await entraService.findOriginForState(
+        req.query.state,
+      );
+
     /*
      * Entra reports a refusal in the query string rather than by
      * failing the request: the person cancelled at the Microsoft
@@ -183,7 +209,7 @@ export async function entraCallback(
 
       res.redirect(
         302,
-        `${environment.frontendOrigin}/sign-in?ssoError=${
+        `${origin}/sign-in?ssoError=${
           encodeURIComponent(
             wasCancelled
               ? "Microsoft sign-in was cancelled."
@@ -198,7 +224,7 @@ export async function entraCallback(
     if (!req.query.code || !req.query.state) {
       res.redirect(
         302,
-        `${environment.frontendOrigin}/sign-in?ssoError=${
+        `${origin}/sign-in?ssoError=${
           encodeURIComponent(
             "Microsoft sign-in did not complete. Start signing in again.",
           )
@@ -208,7 +234,11 @@ export async function entraCallback(
       return;
     }
 
-    const { exchangeCode, redirectTo } =
+    const {
+      exchangeCode,
+      redirectTo,
+      publicOrigin,
+    } =
       await entraService.completeCallback({
         code: String(req.query.code),
         state: String(req.query.state),
@@ -223,7 +253,7 @@ export async function entraCallback(
      */
     const target = new URL(
       "/auth/entra/callback",
-      environment.frontendOrigin,
+      publicOrigin,
     );
 
     target.searchParams.set(
@@ -243,7 +273,7 @@ export async function entraCallback(
 
     res.redirect(302, target.toString());
   } catch (error) {
-    redirectToSignIn(res, error);
+    redirectToSignIn(res, error, origin);
   }
 }
 

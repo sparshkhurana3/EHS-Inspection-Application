@@ -19,6 +19,7 @@ function mapLoginSession(row) {
     nonce: row.nonce,
     codeVerifier: row.code_verifier,
     redirectTo: row.redirect_to,
+    publicOrigin: row.public_origin ?? null,
     userId: row.user_id,
     authorizedAt: row.authorized_at,
     consumedAt: row.consumed_at,
@@ -32,6 +33,7 @@ export async function createLoginSession(
     nonce,
     codeVerifier,
     redirectTo,
+    publicOrigin = null,
     expiresAt,
   },
   client = databasePool,
@@ -43,15 +45,17 @@ export async function createLoginSession(
         nonce,
         code_verifier,
         redirect_to,
+        public_origin,
         expires_at
       )
-      VALUES ($1, $2, $3, $4, $5)
+      VALUES ($1, $2, $3, $4, $5, $6)
       RETURNING
         id,
         state,
         nonce,
         code_verifier,
         redirect_to,
+        public_origin,
         user_id,
         authorized_at,
         consumed_at,
@@ -62,6 +66,7 @@ export async function createLoginSession(
       nonce,
       codeVerifier,
       redirectTo,
+      publicOrigin,
       expiresAt,
     ],
   );
@@ -98,6 +103,7 @@ export async function claimLoginSessionByState(
           nonce,
           code_verifier,
           redirect_to,
+          public_origin,
           user_id,
           authorized_at,
           consumed_at,
@@ -127,6 +133,7 @@ export async function claimLoginSessionByState(
         claimed.nonce,
         claimed.code_verifier,
         claimed.redirect_to,
+        claimed.public_origin,
         claimed.user_id,
         claimed.authorized_at,
         claimed.consumed_at,
@@ -150,6 +157,7 @@ export async function lockLoginSessionByExchangeCode(
         nonce,
         code_verifier,
         redirect_to,
+        public_origin,
         user_id,
         authorized_at,
         consumed_at,
@@ -424,4 +432,26 @@ export async function replaceUserRoles(
   return assigned.rows.map(
     (row) => row.code,
   );
+}
+
+/**
+ * The public origin a pending or finished sign-in started on, without
+ * claiming it. The callback's error branches use it to send the person
+ * back to the address they came from; Entra echoes `state` on errors
+ * too. Null when the row is unknown or started on FRONTEND_ORIGIN.
+ */
+export async function findLoginSessionOriginByState(
+  state,
+  client = databasePool,
+) {
+  const result = await client.query(
+    `
+      SELECT public_origin
+      FROM entra_login_sessions
+      WHERE state = $1
+    `,
+    [state],
+  );
+
+  return result.rows[0]?.public_origin ?? null;
 }

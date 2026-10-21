@@ -51,6 +51,9 @@ services:
       # sends the browser back here, so it must be the server's real
       # name on any deployment other than a laptop.
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-https://localhost}
+      # Other addresses of this same deployment, comma-separated, such as
+      # the Entra application proxy URL. See ENTRA-APP-PROXY.md.
+      FRONTEND_ADDITIONAL_ORIGINS: ${FRONTEND_ADDITIONAL_ORIGINS:-}
       # Empty follows the identity setup: open without Entra, closed
       # with it. See .env.example.
       SELF_SIGNUP_ENABLED: ${SELF_SIGNUP_ENABLED:-}

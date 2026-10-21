@@ -197,14 +197,122 @@ function parseRoleMap(value) {
  * browser back here, so on a real deployment it is the https:// origin
  * of the server, with no trailing slash.
  */
-const frontendOrigin = readOptional(
+/*
+ * One public address, as an origin: https://, no path, no trailing
+ * slash. Plain http is accepted only for localhost, which is what
+ * `npm run dev` uses. A typo here would otherwise only surface as a
+ * failed Microsoft sign-in on somebody's phone, so it fails the boot.
+ */
+function assertPublicOrigin(name, value) {
+  let parsed;
+
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error(
+      `${name} entry "${value}" is not a valid address. Use the form https://host.example.com.`,
+    );
+  }
+
+  const isLocalhost =
+    parsed.protocol === "http:" &&
+    parsed.hostname === "localhost";
+
+  if (
+    parsed.origin !== value ||
+    (parsed.protocol !== "https:" &&
+      !isLocalhost)
+  ) {
+    throw new Error(
+      `${name} entry "${value}" must be an https:// address with no path, for example https://host.example.com.`,
+    );
+  }
+
+  return value;
+}
+
+const frontendOrigin = assertPublicOrigin(
   "FRONTEND_ORIGIN",
-  "http://localhost:5173",
-).replace(/\/+$/, "");
+  readOptional(
+    "FRONTEND_ORIGIN",
+    "http://localhost:5173",
+  ).replace(/\/+$/, ""),
+);
+
+/*
+ * Further addresses that serve this same deployment, such as the
+ * Microsoft Entra application proxy URL that phones use while PCs on
+ * the company network use FRONTEND_ORIGIN (docs/22). Single sign-on
+ * sends each browser back to the address it started on, so every one
+ * of these needs its own callback registered on the app registration.
+ */
+const frontendAdditionalOrigins = readOptional(
+  "FRONTEND_ADDITIONAL_ORIGINS",
+  "",
+)
+  .split(",")
+  .map((value) =>
+    value.trim().replace(/\/+$/, ""),
+  )
+  .filter(Boolean)
+  .map((value) =>
+    assertPublicOrigin(
+      "FRONTEND_ADDITIONAL_ORIGINS",
+      value,
+    ),
+  );
+
+/* Primary first, duplicates dropped. */
+const frontendOrigins = Object.freeze([
+  ...new Set([
+    frontendOrigin,
+    ...frontendAdditionalOrigins,
+  ]),
+]);
+
+/**
+ * The allowed origin a browser says it is on, or the primary when it
+ * names none or one that is not configured. `accepted` is false only
+ * for a value that was supplied and refused, so the caller can log it.
+ * Never answers with an unlisted origin: that would be an open
+ * redirect.
+ */
+export function resolvePublicOrigin(candidate) {
+  if (
+    typeof candidate !== "string" ||
+    candidate.length === 0 ||
+    candidate.length > 255
+  ) {
+    return {
+      origin: frontendOrigin,
+      accepted: candidate === undefined,
+    };
+  }
+
+  const normalised = candidate.replace(
+    /\/+$/,
+    "",
+  );
+
+  return frontendOrigins.includes(normalised)
+    ? { origin: normalised, accepted: true }
+    : { origin: frontendOrigin, accepted: false };
+}
 
 const entraConfiguration = readEntraConfiguration(
   frontendOrigin,
 );
+
+/**
+ * The Entra redirect URI for one public origin. ENTRA_REDIRECT_URI, when
+ * set, overrides it for the primary origin only; every other origin
+ * uses its own address plus the callback path (docs/22 D5).
+ */
+export function entraRedirectUriFor(origin) {
+  return origin === frontendOrigin
+    ? entraConfiguration.redirectUri
+    : `${origin}/api/auth/entra/callback`;
+}
 
 /*
  * Whether anyone who can reach the sign-up page may create an account.
@@ -434,6 +542,7 @@ export const environment = Object.freeze({
   },
 
   frontendOrigin,
+  frontendOrigins,
 
   selfSignupEnabled:
     readSelfSignupEnabled(),

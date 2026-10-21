@@ -77,6 +77,12 @@ router.get(
  * Microsoft and /callback is where Microsoft sends them back, so
  * neither can require a token and both answer with a redirect.
  */
+/*
+ * No validator on /entra/start on purpose: it is a browser navigation,
+ * and validate's JSON 400 would strand the person on a raw error page.
+ * The service checks `origin` against the configured list and treats
+ * anything unusable as missing (docs/22).
+ */
 router.get(
   "/entra/start",
   singleSignOnRateLimiter,
