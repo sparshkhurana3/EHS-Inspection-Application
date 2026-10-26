@@ -93,13 +93,21 @@ Line references are as of commit `24bb98a`.
 
 ### Reports (`features/reports/`, [23](23-reports-page-plan.md))
 
-The sidebar's **Report** link and the `/reports` route are for EHS Officers only (`canViewReports`, `REPORT_ROLES`); the API enforces the same.
+The sidebar's **Report** link and the `/reports` route are for the **EHS Officer and the Plant Head** (`canViewReports`, `REPORT_ROLES`); the API enforces the same, each for their own location.
 
 - `ReportsPage`: Weekly and Yearly tabs (`observation-tabs`), a period picker, **Generate report** and **Download PDF (full report)** (`ReportToolbar`). Nothing is drawn until Generate is pressed; Download works without it and always saves the whole report, whatever the on-screen filters. The generated report's type and period go in the query string, and opening or going Back to such a URL loads that report. The weekly picker lists the server's weeks (newest first); beside it a "go to week [n] of [year]" jump reaches any older week by ISO number (the server converts it, and the URL then names the Monday).
 - Hooks: `useReportOptions` (weeks and years, once), `useReport` (`generate` ignores a response overtaken by a newer one; `download` saves a blob through an object URL). `reports.service.js` wraps the six endpoints.
-- `ReportHeader` draws the Sona Comstar logo and title inside the white `report-sheet`.
+- `ReportHeader` draws the Sona Comstar logo and title inside the white `report-sheet`. Periods are the **company year** (1 April to 31 March, "FY 2026-27", week 1 on the first Monday on or after 1 April): the pickers read "W27 FY 2026-27 · 5 Oct 2026 to 11 Oct 2026", the "go to week" jump takes the week number and the year it starts in, and the yearly picker lists "FY 2026-27 (year to date)".
+- **Weekly extras** ([24](24-hod-escalation-plant-head-photos-plan.md)): an "Include photographs in the PDF" checkbox (sent as `includePhotos=false` when cleared); each inspection row shows "HOD: name"; an expanded observation row has a **Photo** column, `ObservationPhoto`, which fetches the photograph through the existing authenticated route only when the row opens, shows a 96 × 72 thumbnail and opens it full size in a `<dialog>` (Esc or Close). **Yearly extras**: a "Download zone-by-week spreadsheet (.xlsx)" button.
 - **Weekly view**: summary tiles (four are filter buttons with `aria-pressed`), outcome chips, unit, risk and search filters with a live "Showing x of y inspections", Expand all / Collapse all / Clear filters, collapsible unit bands, and per-audit rows whose observations expand. Filters change only what is on screen.
 - **Yearly view**: location tiles, unit filter, a sort select mirrored by sortable column headers (`aria-sort`), "Show only zones below 100%", collapsible units (closed from the fifth unit on), a zone row that opens to a week-by-week strip, and a location total row. Completion is written as a percentage; only 100% (green) and below 75% (red) carry colour.
+
+### HOD, the Plant Head's view, and the company year ([24](24-hod-escalation-plant-head-photos-plan.md))
+
+- **Observation form**: a required **"HOD of the auditee"** select above the first observation, loaded by `useObservationForm` from `GET /observations/hod-options` with the form. With no HOD at the location it shows a warning and disables Submit; "No observation to record" is unaffected. `ObservationDetail` and the closure's `ObservationSummary` show the HOD.
+- **Plant Head**: the dashboard shows the officer's week card **read-only** (`OfficerWeekCard` `canEdit` false: no planning lookups are requested, no Edit buttons, no link to the Plan page). The sidebar has Report but not Plan; `/plan` redirects. The Observations page's "Past 6 months" tab already lists every report at the plant for management roles.
+- **Closures**: the approval queue and the Approve/Reject controls are for `canPlanAudits` users only (EHS Officer, Admin).
+- **Company year**: the dashboard's metrics header reads "FY 2026-27 to date"; the week card reads "Week N" from the company year; the roster and zone-edit text say "through 31 March".
 
 ## Styling
 

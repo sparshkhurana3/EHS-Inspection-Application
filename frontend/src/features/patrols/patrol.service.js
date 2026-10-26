@@ -50,7 +50,7 @@ export function updatePatrolAssignment({
 
 /**
  * Gives every audit of a zone that can still be reassigned, from
- * fromDate to 31 December, the new auditor and auditee. The API clamps
+ * fromDate to 31 March, the new auditor and auditee. The API clamps
  * fromDate to the current week and skips audits already under way.
  */
 export function updateZoneAssignment({

@@ -32,11 +32,23 @@ export const PLANNING_ROLES = Object.freeze([
 ]);
 
 /*
- * Roles allowed to open the Report page (docs/23). The EHS Officer
- * only: the requirement names them, and ADMIN usually has no plant.
+ * Roles allowed to open the Report page and its reports (docs/23,
+ * docs/24 D16): the EHS Officer and the Plant Head, each for their own
+ * location. ADMIN usually has no plant, so it is left out.
  */
 export const REPORT_ROLES = Object.freeze([
   USER_ROLES.EHS_OFFICER,
+  USER_ROLES.PLANT_HEAD,
+]);
+
+/*
+ * Roles allowed to read the officer's week card (docs/24 D15). The
+ * Plant Head sees it read-only: editing stays with PLANNING_ROLES.
+ */
+export const WEEK_VIEW_ROLES = Object.freeze([
+  USER_ROLES.EHS_OFFICER,
+  USER_ROLES.ADMIN,
+  USER_ROLES.PLANT_HEAD,
 ]);
 
 export function normalizeRole(role) {

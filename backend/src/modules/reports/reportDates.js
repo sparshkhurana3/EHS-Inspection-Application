@@ -1,3 +1,9 @@
+import {
+  getFiscalWeek,
+  getFiscalWeekMonday,
+  getFiscalYearOfMonday,
+} from "../../shared/fiscalYear.js";
+
 /*
  * Calendar-date helpers for the reports. Everything here works on
  * "YYYY-MM-DD" strings in UTC, so a report can never drift a day with
@@ -82,85 +88,33 @@ export function getMondayOnOrBefore(dateOnly) {
 }
 
 /**
- * The ISO week number for a "YYYY-MM-DD" Monday.
- *
- * ISO weeks belong to the year holding their Thursday, which is why the
- * calculation hops to Thursday first: the Monday of the week that
- * straddles New Year would otherwise be numbered against the wrong
- * year.
+ * The week number of the week starting on a Monday, counted from the
+ * first Monday on or after 1 April (docs/24, shared/fiscalYear.js).
  */
-export function getIsoWeekNumber(dateOnly) {
-  const date = new Date(`${dateOnly}T00:00:00Z`);
-
-  const dayOfWeek =
-    (date.getUTCDay() + 6) % 7;
-
-  date.setUTCDate(
-    date.getUTCDate() - dayOfWeek + 3,
-  );
-
-  const firstThursday = new Date(
-    Date.UTC(date.getUTCFullYear(), 0, 4),
-  );
-
-  const firstDayOfWeek =
-    (firstThursday.getUTCDay() + 6) % 7;
-
-  firstThursday.setUTCDate(
-    firstThursday.getUTCDate() -
-      firstDayOfWeek +
-      3,
-  );
-
-  return (
-    1 +
-    Math.round(
-      (date - firstThursday) /
-        (7 * 24 * 60 * 60 * 1000),
-    )
-  );
+export function getFiscalWeekNumberOf(monday) {
+  return getFiscalWeek(monday).week;
 }
 
 /**
- * The ISO year of a week: the year of its Thursday, which is why a week
- * starting 29 December can be week 1 of the next year.
+ * The year a week belongs to, named by the calendar year it starts in
+ * (2026 is April 2026 to March 2027).
  */
-export function getIsoYear(weekStart) {
-  return Number(
-    addDays(weekStart, 3).slice(0, 4),
-  );
+export function getFiscalYearOfWeek(monday) {
+  return getFiscalYearOfMonday(monday);
 }
 
 /**
- * The Monday of ISO week `isoWeek` of `isoYear`, or null when that week
- * does not exist (week 53 of a 52-week year, week 0, and so on). Week 1
- * is the week holding 4 January.
+ * The Monday of week `fiscalWeek` of `fiscalYear`, or null when that
+ * year has no such week.
  */
-export function getIsoWeekMonday(
-  isoYear,
-  isoWeek,
+export function getFiscalWeekMondayOf(
+  fiscalYear,
+  fiscalWeek,
 ) {
-  if (
-    !Number.isInteger(isoYear) ||
-    !Number.isInteger(isoWeek) ||
-    isoWeek < 1 ||
-    isoWeek > 53
-  ) {
-    return null;
-  }
-
-  const firstMonday = getMondayOnOrBefore(
-    `${String(isoYear).padStart(4, "0")}-01-04`,
+  return getFiscalWeekMonday(
+    fiscalYear,
+    fiscalWeek,
   );
-
-  const monday = addDays(
-    firstMonday,
-    (isoWeek - 1) * 7,
-  );
-
-  return getIsoWeekNumber(monday) === isoWeek
-    ? monday
-    : null;
 }
 
 /**

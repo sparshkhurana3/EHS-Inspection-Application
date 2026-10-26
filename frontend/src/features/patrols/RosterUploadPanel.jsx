@@ -64,7 +64,8 @@ export default function RosterUploadPanel({
             Upload it once. Every zone in
             the file is scheduled for
             every Monday from today
-            through 31 December. Columns:
+            through 31 March, the end of the
+            company year. Columns:
             Location, Unit, Zone, Auditor
             (email), Auditee (email).
           </p>

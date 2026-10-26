@@ -23,6 +23,7 @@ import {
   getWeeklyReportPdf,
   getWeeklyReportWeeks,
   getYearlyReport,
+  getZoneWeeksSpreadsheet,
   getYearlyReportPdf,
   getYearlyReportYears,
 } from "./reports.controller.js";
@@ -58,7 +59,7 @@ router.get(
 
 /*
  * One week as JSON for the Report page, by `weekStart` or by
- * `isoYear` + `isoWeek`.
+ * `fiscalYear` + `fiscalWeek`.
  */
 router.get(
   "/weekly",
@@ -104,6 +105,17 @@ router.get(
   yearlyReportValidationRules,
   validate,
   getYearlyReportPdf,
+);
+
+/*
+ * The year's zone-by-week spreadsheet: one row per zone, one column per
+ * inspection week, green where the audit happened and red where not.
+ */
+router.get(
+  "/zone-weeks.xlsx",
+  authenticate,
+  authorize(...REPORT_ROLES),
+  getZoneWeeksSpreadsheet,
 );
 
 export default router;

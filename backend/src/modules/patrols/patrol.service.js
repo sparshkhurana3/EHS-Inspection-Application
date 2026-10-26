@@ -1,6 +1,12 @@
 import AppError from "../../shared/errors/AppError.js";
 
 import {
+  getFiscalWeek,
+  getFiscalYearOfDate,
+  getFiscalYearRange,
+} from "../../shared/fiscalYear.js";
+
+import {
   withTransaction,
 } from "../../config/database.js";
 
@@ -569,7 +575,7 @@ async function reassignZoneAudits(
  *
  * When applyToUpcoming is true (the default), the change is propagated
  * through reassignZoneAudits to the zone's audits from the edited
- * patrol's date to 31 December of that year, roster-generated or
+ * patrol's date to the end of the company year (31 March), roster-generated or
  * manually planned alike, and the zone's roster row (if any) is updated
  * to match. When false, only the one patrol changes.
  */
@@ -671,7 +677,9 @@ export async function updatePatrolAssignment(
           auditorId,
           auditeeId,
           fromDate,
-          toDate: `${fromDate.slice(0, 4)}-12-31`,
+          toDate: getFiscalYearRange(
+            getFiscalYearOfDate(fromDate),
+          ).to,
         },
         client,
       );
@@ -717,7 +725,7 @@ export async function updatePatrolAssignment(
 
 /**
  * The dashboard's zone edit: gives every audit of a zone that is still
- * SCHEDULED with no observation report, from fromDate to 31 December, a
+ * SCHEDULED with no observation report, from fromDate to the end of the company year (31 March), a
  * new auditor and auditee, and the zone's roster row with them. No
  * anchor audit is needed, so a report already filed this week does not
  * block changing the zone's future. Audits under way in the range keep
@@ -772,8 +780,9 @@ export async function updateZoneAssignment(
       ? requestedFromDate
       : currentWeekStart;
 
-  const toDate =
-    `${fromDate.slice(0, 4)}-12-31`;
+  const toDate = getFiscalYearRange(
+    getFiscalYearOfDate(fromDate),
+  ).to;
 
   const {
     zone,
@@ -971,11 +980,13 @@ export async function uploadRoster({
       getCurrentDate(),
     );
 
-  const currentYear = Number(
-    firstMonday.slice(0, 4),
-  );
-
-  const lastDate = `${currentYear}-12-31`;
+  /*
+   * The company year ends on 31 March, so a roster uploaded in the
+   * autumn schedules through the following March (docs/24 D23).
+   */
+  const lastDate = getFiscalYearRange(
+    getFiscalYearOfDate(firstMonday),
+  ).to;
 
   if (firstMonday > lastDate) {
     throw new AppError(
@@ -1303,45 +1314,11 @@ export async function uploadRoster({
 }
 
 /**
- * The ISO week number for a "YYYY-MM-DD" Monday.
- *
- * ISO weeks belong to the year holding their Thursday, which is why the
- * calculation hops to Thursday first: the Monday of the week that
- * straddles New Year would otherwise be numbered against the wrong
- * year. Kept here rather than imported from the dashboard because the
- * two modules are deliberately self-contained; if a third needs it,
- * that is the moment to extract it.
+ * The week number of a "YYYY-MM-DD" Monday, counted from the first
+ * Monday on or after 1 April (docs/24 D23, shared/fiscalYear.js).
  */
-function getIsoWeekNumber(dateOnly) {
-  const date = new Date(`${dateOnly}T00:00:00Z`);
-
-  const dayOfWeek =
-    (date.getUTCDay() + 6) % 7;
-
-  date.setUTCDate(
-    date.getUTCDate() - dayOfWeek + 3,
-  );
-
-  const firstThursday = new Date(
-    Date.UTC(date.getUTCFullYear(), 0, 4),
-  );
-
-  const firstDayOfWeek =
-    (firstThursday.getUTCDay() + 6) % 7;
-
-  firstThursday.setUTCDate(
-    firstThursday.getUTCDate() -
-      firstDayOfWeek +
-      3,
-  );
-
-  return (
-    1 +
-    Math.round(
-      (date - firstThursday) /
-        (7 * 24 * 60 * 60 * 1000),
-    )
-  );
+function getFiscalWeekNumber(dateOnly) {
+  return getFiscalWeek(dateOnly).week;
 }
 
 /**
@@ -1377,7 +1354,9 @@ export async function getInspectionReport({
     referenceDate,
   );
 
-  const fromDate = `${cutoffDate.slice(0, 4)}-01-01`;
+  const fromDate = getFiscalYearRange(
+    getFiscalYearOfDate(cutoffDate),
+  ).from;
 
   const [zones, weekStatuses] =
     await Promise.all([
@@ -1431,7 +1410,7 @@ export async function getInspectionReport({
     .sort()
     .map((weekStart) => ({
       weekStart,
-      isoWeek: getIsoWeekNumber(weekStart),
+      fiscalWeek: getFiscalWeekNumber(weekStart),
     }));
 
   /*

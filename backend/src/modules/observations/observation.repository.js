@@ -2,6 +2,10 @@ import {
   databasePool,
 } from "../../config/database.js";
 
+import {
+  getFiscalWeekNumber,
+} from "../../shared/fiscalYear.js";
+
 const RISK_RANK = {
   HIGH: 1,
   MEDIUM: 2,
@@ -13,6 +17,25 @@ const RISK_LABEL_BY_RANK = {
   2: "MEDIUM",
   3: "LOW",
 };
+
+/**
+ * The week number of an audit, counted from the first Monday on or
+ * after 1 April (docs/24 D23), from its scheduled date. A DATE column
+ * comes back from `pg` as a JS Date.
+ */
+function getWeekNumber(scheduledDate) {
+  if (!scheduledDate) {
+    return null;
+  }
+
+  return getFiscalWeekNumber(
+    scheduledDate instanceof Date
+      ? scheduledDate
+          .toISOString()
+          .slice(0, 10)
+      : String(scheduledDate).slice(0, 10),
+  );
+}
 
 function mapAssignment(row) {
   if (!row) {
@@ -26,7 +49,7 @@ function mapAssignment(row) {
       row.scheduled_date,
 
     weekNumber:
-      Number(row.week_number),
+      getWeekNumber(row.scheduled_date),
 
     unitId:
       row.unit_id,
@@ -266,8 +289,8 @@ export async function findCalendarPatrols({
  * auditor, each with its observation report if one has been filed, plus
  * any still-unfiled audit from the previous 4 weeks (so a missed
  * Thursday deadline does not silently disappear when the week rolls
- * over). Week number is the ISO week of the scheduled date, matching
- * the dashboard's "Week N audit" label.
+ * over). Week number is the company year's week of the scheduled date,
+ * matching the dashboard's "Week N audit" label.
  */
 export async function findWeeklyAuditorAssignments(
   {
@@ -282,15 +305,6 @@ export async function findWeeklyAuditorAssignments(
         patrol.id,
         patrol.scheduled_date,
         patrol.status,
-
-        /*
-         * PostgreSQL's WEEK field is already the ISO 8601 week-
-         * numbering week, matching the dashboard's "Week N audit".
-         */
-        EXTRACT(
-          WEEK FROM patrol.scheduled_date
-        )::INT AS week_number,
-
         unit_record.id AS unit_id,
         unit_record.unit_number,
         unit_record.name AS unit_name,
@@ -438,7 +452,7 @@ export async function findWeeklyAuditorAssignments(
   return result.rows.map((row) => ({
     ...mapAssignment(row),
 
-    weekNumber: Number(row.week_number),
+    weekNumber: getWeekNumber(row.scheduled_date),
 
     report: row.report_id
       ? {
@@ -908,6 +922,7 @@ export async function createReport(
     auditeeId,
     findingDate,
     plantLocation,
+    hodId,
     items,
   },
   client,
@@ -931,7 +946,8 @@ export async function createReport(
         photograph_size,
         description,
         risk_category,
-        zone_area_id
+        zone_area_id,
+        hod_id
       )
       VALUES (
         $1,
@@ -948,7 +964,8 @@ export async function createReport(
         $11,
         $12,
         $13,
-        $14
+        $14,
+        $15
       )
       RETURNING
         id,
@@ -982,6 +999,7 @@ export async function createReport(
       firstItem.description,
       firstItem.riskCategory,
       firstItem.zoneAreaId,
+      hodId,
     ],
   );
 
@@ -1265,6 +1283,7 @@ export async function findReportByIdForUser(
         auditor.full_name AS auditor_name,
         auditee.full_name AS auditee_name,
         ehs_officer.full_name AS ehs_officer_name,
+        hod.full_name AS hod_name,
 
         closure_request.id AS closure_id,
         closure_request.status AS closure_status,
@@ -1297,6 +1316,9 @@ export async function findReportByIdForUser(
 
       LEFT JOIN users AS ehs_officer
         ON ehs_officer.id = patrol.ehs_officer_id
+
+      LEFT JOIN users AS hod
+        ON hod.id = observation_report.hod_id
 
       LEFT JOIN zone_areas AS zone_area
         ON zone_area.id = observation_report.zone_area_id
@@ -1352,6 +1374,7 @@ export async function findReportByIdForUser(
     auditorName: row.auditor_name,
     auditeeName: row.auditee_name,
     ehsOfficerName: row.ehs_officer_name,
+    hodName: row.hod_name ?? null,
 
     closure: row.closure_id
       ? {
@@ -1446,6 +1469,7 @@ export async function findReportHistory(
 
         auditor.full_name AS auditor_name,
         auditee.full_name AS auditee_name,
+        hod.full_name AS hod_name,
 
         closure_request.id AS closure_id,
         closure_request.status AS closure_status,
@@ -1486,6 +1510,9 @@ export async function findReportHistory(
 
       JOIN users AS auditee
         ON auditee.id = patrol.auditee_id
+
+      LEFT JOIN users AS hod
+        ON hod.id = observation_report.hod_id
 
       LEFT JOIN closure_requests AS closure_request
         ON closure_request.observation_report_id =
@@ -1538,10 +1565,10 @@ export async function findReportHistory(
 
     auditorName: row.auditor_name,
     auditeeName: row.auditee_name,
+    hodName: row.hod_name ?? null,
 
     closureId: row.closure_id,
     closureStatus: row.closure_status,
-
 
     observationCount: Number(
       row.observation_count ?? 0,
@@ -1550,4 +1577,125 @@ export async function findReportHistory(
       row.highest_risk_rank,
     ),
   }));
+}
+
+/**
+ * The people who can be named as the HOD of an auditee on one patrol
+ * (docs/24 D4): active users with the HOD role at the patrol's plant,
+ * except the patrol's own auditee. Only the patrol's auditor may ask.
+ * `found` is false when the patrol does not exist or is not theirs.
+ */
+export async function findHodOptionsForPatrol(
+  {
+    patrolId,
+    auditorId,
+  },
+  client = databasePool,
+) {
+  const patrolResult = await client.query(
+    `
+      SELECT
+        patrol.auditee_id,
+        unit_record.plant_id
+
+      FROM patrols AS patrol
+
+      JOIN units AS unit_record
+        ON unit_record.id = patrol.unit_id
+
+      WHERE
+        patrol.id = $1
+        AND patrol.auditor_id = $2
+    `,
+    [patrolId, auditorId],
+  );
+
+  const patrol = patrolResult.rows[0];
+
+  if (!patrol) {
+    return { found: false, hods: [] };
+  }
+
+  const hodResult = await client.query(
+    `
+      SELECT
+        hod.id,
+        hod.full_name,
+        hod.email
+
+      FROM users AS hod
+
+      WHERE
+        hod.is_active = TRUE
+        AND hod.plant_id = $1
+        AND hod.id <> $2
+        AND EXISTS (
+          SELECT 1
+          FROM user_roles AS ur
+          JOIN roles AS ro
+            ON ro.id = ur.role_id
+          WHERE
+            ur.user_id = hod.id
+            AND ro.code = 'HOD'
+        )
+
+      ORDER BY hod.full_name
+    `,
+    [patrol.plant_id, patrol.auditee_id],
+  );
+
+  return {
+    found: true,
+    hods: hodResult.rows.map((row) => ({
+      id: String(row.id),
+      fullName: row.full_name,
+      email: row.email,
+    })),
+  };
+}
+
+/**
+ * One candidate HOD checked against the same rules, inside the
+ * submission's transaction. Null when the user may not be chosen.
+ */
+export async function findValidHodForPatrol(
+  {
+    patrolId,
+    hodId,
+  },
+  client = databasePool,
+) {
+  const result = await client.query(
+    `
+      SELECT
+        hod.id,
+        hod.full_name
+
+      FROM patrols AS patrol
+
+      JOIN units AS unit_record
+        ON unit_record.id = patrol.unit_id
+
+      JOIN users AS hod
+        ON hod.id = $2
+
+      WHERE
+        patrol.id = $1
+        AND hod.is_active = TRUE
+        AND hod.plant_id = unit_record.plant_id
+        AND hod.id <> patrol.auditee_id
+        AND EXISTS (
+          SELECT 1
+          FROM user_roles AS ur
+          JOIN roles AS ro
+            ON ro.id = ur.role_id
+          WHERE
+            ur.user_id = hod.id
+            AND ro.code = 'HOD'
+        )
+    `,
+    [patrolId, hodId],
+  );
+
+  return result.rows[0] ?? null;
 }

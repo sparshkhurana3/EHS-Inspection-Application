@@ -7,6 +7,7 @@ import {
 
 import {
   createObservationReport,
+  fetchHodOptions,
   fetchObservationHistory,
   fetchObservationItemPhotograph,
   fetchObservationReport,
@@ -137,12 +138,23 @@ function revokeItemPreviews(items) {
 export function useObservationForm(assignment) {
   const [values, setValues] = useState(() => ({
     findingDate: todayValue(),
+    hodId: "",
     observations: [createEmptyItem()],
   }));
 
   const [submitting, setSubmitting] =
     useState(false);
   const [error, setError] = useState("");
+
+  /*
+   * The auditee's HOD is mandatory, chosen from the HODs of this
+   * patrol's location (docs/24). Loaded with the form, so a location
+   * with none is known before the auditor has typed anything.
+   */
+  const [hods, setHods] = useState([]);
+  const [hodsLoading, setHodsLoading] =
+    useState(true);
+  const [hodsError, setHodsError] = useState("");
 
   const itemsRef = useRef(values.observations);
 
@@ -156,10 +168,46 @@ export function useObservationForm(assignment) {
 
     setValues({
       findingDate: todayValue(),
+      hodId: "",
       observations: [createEmptyItem()],
     });
 
     setError("");
+  }, [assignment?.id]);
+
+  useEffect(() => {
+    if (!assignment?.id) {
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    setHodsLoading(true);
+    setHodsError("");
+
+    fetchHodOptions(assignment.id)
+      .then((result) => {
+        if (!cancelled) {
+          setHods(result?.hods ?? []);
+        }
+      })
+      .catch((requestError) => {
+        if (!cancelled) {
+          setHods([]);
+          setHodsError(
+            getErrorMessage(requestError),
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setHodsLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [assignment?.id]);
 
   useEffect(
@@ -337,6 +385,10 @@ export function useObservationForm(assignment) {
       return "Finding date is required.";
     }
 
+    if (!values.hodId) {
+      return "Select the HOD for the auditee.";
+    }
+
     if (values.observations.length === 0) {
       return "Add at least one observation.";
     }
@@ -401,6 +453,7 @@ export function useObservationForm(assignment) {
       return await createObservationReport({
         patrolId: assignment.id,
         findingDate: values.findingDate,
+        hodId: values.hodId,
         observations: values.observations,
       });
     } catch (requestError) {
@@ -417,6 +470,9 @@ export function useObservationForm(assignment) {
     maxObservations: MAX_OBSERVATIONS,
     maxDescriptionWords:
       MAX_DESCRIPTION_WORDS,
+    hods,
+    hodsLoading,
+    hodsError,
     submitting,
     error,
     updateField,

@@ -86,7 +86,7 @@ function paint(cell, kind) {
  * Builds the workbook and returns it as a Buffer.
  *
  * `weeks` are the inspection weeks in order, each `{ weekStart,
- * isoWeek }`. `rows` are the zones in display order, each carrying a
+ * fiscalWeek }`. `rows` are the zones in display order, each carrying a
  * `cells` map keyed by `weekStart`.
  */
 export async function buildInspectionReportWorkbook({
@@ -192,7 +192,7 @@ export async function buildInspectionReportWorkbook({
 
     ...weeks.map(
       (week) =>
-        `W${week.isoWeek}\n${formatWeekLabel(
+        `W${week.fiscalWeek}\n${formatWeekLabel(
           week.weekStart,
         )}`,
     ),

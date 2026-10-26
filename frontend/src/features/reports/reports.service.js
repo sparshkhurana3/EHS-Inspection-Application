@@ -43,12 +43,23 @@ export function fetchYearlyReportYears() {
 }
 
 /**
- * `params` is { weekStart } or { isoYear, isoWeek } for a weekly
+ * `params` is { weekStart } or { fiscalYear, fiscalWeek } for a weekly
  * report, { year } for a yearly one.
  */
 export function fetchReport(type, params) {
   return apiRequest(
     `/reports/${type}?${toQuery(params)}`,
+    { method: "GET" },
+  );
+}
+
+/**
+ * The year's zone-by-week spreadsheet (.xlsx), for the officer and the
+ * Plant Head, for their own location.
+ */
+export function fetchZoneWeeksSpreadsheet() {
+  return apiBlobRequest(
+    "/reports/zone-weeks.xlsx",
     { method: "GET" },
   );
 }

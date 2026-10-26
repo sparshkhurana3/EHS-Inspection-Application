@@ -124,7 +124,7 @@ router.patch(
 
 /*
  * Reassigns every audit of a zone that is still SCHEDULED with no
- * observation report, from a given date to 31 December, and the zone's
+ * observation report, from a given date to the end of the company year (31 March), and the zone's
  * roster row with them. Three segments, so it never collides with
  * /:patrolId/assignment. Scope to the officer's own location is
  * enforced in the service.

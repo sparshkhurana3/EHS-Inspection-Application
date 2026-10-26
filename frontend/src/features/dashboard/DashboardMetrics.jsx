@@ -175,8 +175,8 @@ export default function DashboardMetrics({
 
         <span className="dashboard-single-record">
           {[
-            period?.year
-              ? `${period.year} to date`
+            period?.yearLabel
+              ? `FY ${period.yearLabel} to date`
               : "Year to date",
             isPlantWide
               ? period?.scopeName ?? "All locations"

@@ -8,7 +8,10 @@ repository to a production service on your own server, with:
 - **Microsoft Intune** delivering the app to company Windows PCs and to
   staff's own phones, and enforcing the device and app conditions for
   reaching it;
-- **SharePoint Online** holding the inspection photographs.
+- **SharePoint Online** holding the inspection photographs;
+- **Email alerts** over SMTP to HODs, Plant Heads, auditors and
+  auditees about observation reports and closures that are not closed
+  (chapter 15, optional).
 
 Work through the chapters in order. Each one ends with a check, so a
 mistake is caught where it was made rather than three chapters later.
@@ -25,6 +28,7 @@ mistake is caught where it was made rather than three chapters later.
 | 10 | SharePoint administrator + Entra administrator | SharePoint Administrator; an account that can grant `Sites.FullControl.All` for one call |
 | 11 | Intune administrator (+ Conditional Access administrator) | Intune Administrator; Conditional Access Administrator |
 | 12–14 | Server administrator | — |
+| 15 | Server administrator + Exchange / mail administrator | An SMTP server or relay the backend can reach, and a sender address |
 
 Allow a day for the whole thing, most of it waiting on other people:
 the certificate, DNS, and the list of who gets which role.
@@ -418,6 +422,16 @@ Two facts drive this chapter:
 So before the first roster upload, import every EHS Officer, auditor and
 auditee with their plant.
 
+**HODs and Plant Heads need the role and a plant.** The auditor must pick
+the auditee's HOD when filing a report with observations, from the people
+with the `HOD` role **at the same plant**, so every plant needs at least
+one HOD (with no HOD at a plant, reports with observations cannot be
+sent from it). Assign the `HOD` and `PLANT_HEAD` app roles in Entra
+([guide.md](guide.md)); the roles are rewritten from the directory at
+every sign-in. The email alerts (chapter 15) go to the address on their
+account, so they also need a working email. Check with
+`docker compose exec backend node scripts/admin.js list-users`.
+
 ### 9.1 Import
 
 Make a CSV — `people.csv`:
@@ -455,8 +469,10 @@ Nobody who will be rostered should have an empty `plant` column.
 The EHS Officer then signs in, opens **Plan**, downloads the roster
 template (it is pre-filled with that plant's locations), fills in the
 auditor and auditee email for each zone, and uploads it. The upload
-schedules every zone for every Monday until 31 December. **It has to be
-uploaded again each January** for the new year.
+schedules every zone for every Monday until **31 March**, the end of the
+company year (which runs 1 April to 31 March; week 1 starts on the first
+Monday on or after 1 April, for example Monday 6 April 2026). **It has to
+be uploaded again each April** for the new year.
 
 - **The officer may put their own email in the file**, as the auditor
   of one zone or the auditee of another. They then file that report, or
@@ -472,7 +488,7 @@ uploaded again each January** for the new year.
   dashboard, the officer opens the week card, moves to the week the
   change starts (Previous / Next), presses **Edit** on the zone and
   chooses either *every audit of this zone* from that week to
-  31 December, or *only this audit*. Audits already under way keep their
+  31 March, or *only this audit*. Audits already under way keep their
   people, and the confirmation says how many changed.
 - **Uploading the roster again overwrites those changes.** A re-upload
   rebuilds every upcoming Monday audit generated from the roster, from
@@ -752,6 +768,8 @@ VPN is the simpler alternative if you already run one for phones.
 - [ ] Every plant, unit, zone and area is loaded; every zone has areas
 - [ ] Every rostered person is imported with a plant (`list-users`)
 - [ ] The first roster is uploaded and the dashboard shows this week's audits
+- [ ] Every plant has at least one person with the `HOD` role and a plant, and the Plant Head has the `PLANT_HEAD` role and a plant
+- [ ] If email alerts are on: `scripts/alerts.js check` connects, and `scripts/alerts.js test-email <an HOD's address>` reaches that mailbox
 - [ ] `scripts/sharepoint.js check` passes; a test observation's photograph appears in the library
 - [ ] The Intune pilot (11.1 step 4) passed on both phone platforms; Conditional Access switched from Report-only to On
 - [ ] Backups (§13.2) run, and one has been test-restored
@@ -821,7 +839,7 @@ check its photograph shows.
 |---|---|
 | Before the Entra client secret expires (≤ 24 months) | New secret in the app registration → update `ENTRA_CLIENT_SECRET` (and `SHAREPOINT_CLIENT_SECRET` if separate) → `docker compose up -d` → delete the old secret. |
 | Before the TLS certificate expires | Replace `certs/tls.crt` and `certs/tls.key`, then `docker compose restart frontend`. |
-| Each January | The EHS Officer uploads the new year's roster. |
+| Each April (before the first Monday on or after 1 April) | The EHS Officer uploads the new company year's roster. |
 | Quarterly | Review role groups in Entra; sign in with each break-glass account; test-restore a backup. |
 
 ### 13.5 Disk
@@ -882,7 +900,99 @@ All with `docker compose exec backend node scripts/admin.js …`:
 | Submitting photos: "could not be saved to document storage" | SharePoint unreachable, secret expired, or grant missing | `scripts/sharepoint.js check`; `docker compose logs backend \| grep -i sharepoint` |
 | Phone: cannot attach a photo in Edge | App protection policy blocks Camera / Photo Library | §11.1 step 1 |
 | Phone: "access blocked" after Microsoft sign-in | Conditional Access requirement not met (Edge not signed in, no broker app) | Sign-in log in Entra → Conditional Access tab |
+| Auditor: "No HOD is set up for this location" | No active user at that plant has the `HOD` role | Assign the `HOD` role in Entra and set the plant (§9) |
+| No alert emails arrive | Email is off, or the server refuses | `scripts/alerts.js check`; `docker compose logs backend \| grep -i "email\|smtp"`; chapter 15 |
 | Locked-out break-glass account | Five wrong passwords → 15-minute lock | Wait, or `admin.js reset-password` |
 
 Something not covered here: `docker compose logs backend` first — every
 failure the app handles is logged as one JSON line with a `code`.
+
+---
+
+## 15. Email alerts (optional)
+
+The app can email people about observation reports that are not being
+closed. It is **off until you set `SMTP_HOST`**; nothing else in the app
+depends on it.
+
+### 15.1 What is sent, and to whom
+
+| When | To | What |
+|---|---|---|
+| A report with observations is **15 days** old and the auditee has not sent the closure for approval | the **HOD** the auditor named on that report | The auditee, the report number, the date it was generated, its unit and zone, and a link |
+| The same report is **30 days** old and still not sent for approval | every active **Plant Head** at that plant | The same, plus the HOD |
+| Every **Monday** | each **auditor** with an audit from an earlier week still unreported, and each **auditee** with a closure from an earlier week still unfinished | One email listing those items |
+
+- Emails go to the address on each person's account (for Microsoft
+  sign-in users, their company address from the directory). Someone
+  with no email, or deactivated, is skipped and logged.
+- Each escalation is sent **once** per report and person. Someone with
+  several overdue reports gets **one email** listing them.
+- Only reports filed after the HOD became mandatory can escalate.
+- "Closed by the auditee" means the closure has been **sent for approval**
+  or approved. A closure sent back by the EHS Officer counts as not
+  closed again.
+- Alerts are sent after `ALERT_SEND_TIME` (default 09:00, in
+  `ALERT_TIMEZONE`, default `Asia/Kolkata`). If the server was off at
+  that time, they go out when it is next up that day.
+
+### 15.2 Choose how the app sends mail (Microsoft 365 administrator)
+
+Microsoft is retiring basic (user name and password) authentication for
+SMTP in Exchange Online, so a plain `smtp.office365.com` login may not
+work in your tenant. Choose one:
+
+1. **An Exchange Online connector / SMTP relay** that accepts mail from
+   the server's public IP address. No password: leave `SMTP_USER` and
+   `SMTP_PASSWORD` empty, use your tenant's MX host
+   (`<tenant>.mail.protection.outlook.com`) on port 25, and set the
+   sender to an address in an accepted domain.
+2. **An on-premises mail relay** the server can reach.
+3. **An authenticated SMTP account** if your tenant still allows it
+   (`smtp.office365.com`, port 587, STARTTLS, a mailbox with SMTP AUTH
+   enabled).
+
+If none works, tell whoever maintains the app: sending through the
+Microsoft Graph API instead is possible but is a code change.
+
+### 15.3 Configure it (server administrator)
+
+In `.env` (see `.env.example` for every setting):
+
+```dotenv
+SMTP_HOST=smtp-relay.contoso.com
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_REQUIRE_TLS=true
+SMTP_USER=
+SMTP_PASSWORD=
+SMTP_FROM=EHS Inspection <ehs-alerts@contoso.com>
+```
+
+Apply it (`.env` is read when the container is created):
+
+```bash
+docker compose up -d
+```
+
+If a setting is missing or wrong the backend refuses to start and says
+which; `docker compose logs backend --tail 20`.
+
+### 15.4 Check it
+
+```bash
+docker compose exec backend node scripts/alerts.js check
+docker compose exec backend node scripts/alerts.js test-email someone@contoso.com
+docker compose exec backend node scripts/alerts.js due
+```
+
+- `check` connects to the mail server (and signs in, if you set a user).
+- `test-email` sends one short message. Ask the person whether it
+  arrived, and look in their junk folder.
+- `due` is a **dry run**: it prints every email that would be sent now,
+  to whom, and sends nothing.
+- `run` sends everything due now, ignoring the send time. Anything
+  already sent is never sent again.
+
+A failed send is logged with the server's reason and tried again at the
+next check; it is never marked as sent.

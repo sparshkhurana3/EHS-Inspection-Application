@@ -168,6 +168,12 @@ export default function ObservationDetail({
           label="EHS Officer"
           value={report.ehsOfficerName}
         />
+        {report.noObservations ? null : (
+          <Field
+            label="HOD of the auditee"
+            value={report.hodName}
+          />
+        )}
         <Field
           label="Submitted"
           value={formatDate(report.submittedAt)}

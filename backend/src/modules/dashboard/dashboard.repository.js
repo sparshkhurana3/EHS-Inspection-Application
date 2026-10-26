@@ -282,11 +282,18 @@ export async function findUserCurrentWeekPatrols(
   return result.rows.map(mapAudit);
 }
 
+/*
+ * Both management calendar queries are limited to the viewer's plant
+ * when they have one, so a manager sees their own location and not the
+ * others' (docs/24 D15, backlog 3.13). A manager with no plant keeps
+ * seeing every plant, as the metrics do.
+ */
 export async function findManagementMonthlyPatrols(
   {
     userId,
     monthStart,
     monthEnd,
+    plantId = null,
   },
   client = databasePool,
 ) {
@@ -375,6 +382,10 @@ export async function findManagementMonthlyPatrols(
         p.scheduled_date >= $2::DATE
         AND p.scheduled_date < $3::DATE
         AND p.status <> 'CANCELLED'
+        AND (
+          $4::BIGINT IS NULL
+          OR u.plant_id = $4::BIGINT
+        )
 
       ORDER BY
         p.scheduled_date ASC,
@@ -385,6 +396,7 @@ export async function findManagementMonthlyPatrols(
       userId,
       monthStart,
       monthEnd,
+      plantId,
     ],
   );
 
@@ -395,6 +407,7 @@ export async function findManagementCurrentWeekPatrols(
   {
     weekStart,
     weekEnd,
+    plantId = null,
   },
   client = databasePool,
 ) {
@@ -469,6 +482,10 @@ export async function findManagementCurrentWeekPatrols(
         p.scheduled_date >= $1::DATE
         AND p.scheduled_date < $2::DATE
         AND p.status <> 'CANCELLED'
+        AND (
+          $3::BIGINT IS NULL
+          OR u.plant_id = $3::BIGINT
+        )
 
       ORDER BY
         z.name ASC,
@@ -478,6 +495,7 @@ export async function findManagementCurrentWeekPatrols(
     [
       weekStart,
       weekEnd,
+      plantId,
     ],
   );
 
@@ -489,7 +507,7 @@ export async function findManagementCurrentWeekPatrols(
  * done, split by the side of the patrol they were on.
  *
  * Bounded by `cutoffDate` (today) rather than running to the end of the
- * year, because a roster schedules every Monday to 31 December: counting
+ * year, because a roster schedules every Monday to 31 March: counting
  * the whole year would tell somebody in January that they had done 2 of
  * 52 inspections. "Assigned so far" is the number that says whether they
  * are keeping up.

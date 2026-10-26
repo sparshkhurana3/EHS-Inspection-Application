@@ -146,6 +146,13 @@ function buildInspectionRows(inspection) {
               line(
                 `Auditee: ${inspection.auditeeName}`,
               ),
+              ...(inspection.hodName
+                ? [
+                    line(
+                      `HOD: ${inspection.hodName}`,
+                    ),
+                  ]
+                : []),
             ]
           : [],
 
@@ -242,9 +249,26 @@ function buildInspectionRows(inspection) {
   );
 }
 
+/*
+ * The photograph block (docs/24 D21): up to four photographs per row,
+ * each fitted in a 175 x 130 pt frame with a label under it.
+ */
+const PHOTO_WIDTH = 175;
+const PHOTO_HEIGHT = 130;
+const PHOTO_GAP = 12;
+const PHOTO_LABEL_HEIGHT = 12;
+const PHOTOS_PER_ROW = 4;
+
+/**
+ * `photos` maps an observation's item id to a JPEG buffer, or to null
+ * when it could not be added. Omit it for a text-only report.
+ */
 export async function buildWeeklyInspectionPdf(
   model,
-  { generatedBy },
+  {
+    generatedBy,
+    photos = null,
+  },
 ) {
   const dueDay = formatDayAndMonth(
     model.dueDate,
@@ -255,11 +279,11 @@ export async function buildWeeklyInspectionPdf(
     await createReportDocument({
       title: "Weekly inspection report",
 
-      subtitle: `${model.plant.name} · Week ${model.isoWeek}, ${model.isoYear} · ${formatReportDate(model.weekStart)} – ${formatReportDate(model.weekEnd)}`,
+      subtitle: `${model.plant.name} · Week ${model.fiscalWeek}, FY ${model.fiscalYearLabel} · ${formatReportDate(model.weekStart)} – ${formatReportDate(model.weekEnd)}`,
 
       generatedLine: `Generated ${formatReportDate(model.generatedAt)} by ${generatedBy}`,
 
-      documentTitle: `Weekly inspection report · ${model.plant.name} · Week ${model.isoWeek}, ${model.isoYear}`,
+      documentTitle: `Weekly inspection report · ${model.plant.name} · Week ${model.fiscalWeek}, FY ${model.fiscalYearLabel}`,
     });
 
   let y = BODY_TOP;
@@ -398,6 +422,141 @@ export async function buildWeeklyInspectionPdf(
     drawSharedRule(doc, y, isGroupEnd);
   }
 
+  function drawPhotoCaption(text) {
+    doc
+      .font("Helvetica-Bold")
+      .fontSize(7.5)
+      .fillColor(COLOURS.strong)
+      .text(
+        toPdfText(text),
+        MARGIN.left + CELL_PADDING,
+        y + 4,
+        { width: CONTENT_WIDTH, lineBreak: false },
+      );
+
+    y += 16;
+  }
+
+  /*
+   * After an inspection's rows: its observation photographs, labelled
+   * with the observation number and area. A photograph that could not
+   * be added shows a placeholder naming the report, so it can be opened
+   * in the app.
+   */
+  function drawPhotoBlock(inspection, unitName) {
+    if (
+      !photos ||
+      inspection.observations.length === 0
+    ) {
+      return;
+    }
+
+    const rowHeight =
+      PHOTO_HEIGHT + PHOTO_LABEL_HEIGHT + 8;
+
+    ensureSpace(16 + rowHeight, () =>
+      drawUnitBand(unitName, true),
+    );
+
+    drawPhotoCaption(
+      `Photographs · ${inspection.zoneName}`,
+    );
+
+    for (
+      let start = 0;
+      start < inspection.observations.length;
+      start += PHOTOS_PER_ROW
+    ) {
+      ensureSpace(rowHeight, () => {
+        drawUnitBand(unitName, true);
+
+        drawPhotoCaption(
+          `Photographs · ${inspection.zoneName} (cont.)`,
+        );
+      });
+
+      inspection.observations
+        .slice(start, start + PHOTOS_PER_ROW)
+        .forEach((observation, offset) => {
+          const x =
+            MARGIN.left +
+            CELL_PADDING +
+            offset * (PHOTO_WIDTH + PHOTO_GAP);
+
+          const buffer = photos.get(
+            observation.itemId,
+          );
+
+          doc
+            .rect(x, y, PHOTO_WIDTH, PHOTO_HEIGHT)
+            .lineWidth(0.5)
+            .strokeColor(COLOURS.divider)
+            .stroke();
+
+          if (buffer) {
+            doc.image(buffer, x + 1, y + 1, {
+              fit: [
+                PHOTO_WIDTH - 2,
+                PHOTO_HEIGHT - 2,
+              ],
+              align: "center",
+              valign: "center",
+            });
+          } else {
+            doc
+              .rect(
+                x + 1,
+                y + 1,
+                PHOTO_WIDTH - 2,
+                PHOTO_HEIGHT - 2,
+              )
+              .fill(COLOURS.headerBand);
+
+            doc
+              .font("Helvetica")
+              .fontSize(7.5)
+              .fillColor(COLOURS.muted)
+              .text(
+                toPdfText(
+                  `Photograph not available in the PDF. Open report ${
+                    inspection.reportNumber ?? ""
+                  } in the app.`,
+                ),
+                x + 10,
+                y + PHOTO_HEIGHT / 2 - 12,
+                {
+                  width: PHOTO_WIDTH - 20,
+                  align: "center",
+                },
+              );
+          }
+
+          doc
+            .font("Helvetica")
+            .fontSize(7)
+            .fillColor(COLOURS.subtle)
+            .text(
+              toPdfText(
+                `Obs ${observation.sequenceNumber} · ${
+                  observation.areaName ?? "–"
+                }`,
+              ),
+              x,
+              y + PHOTO_HEIGHT + 3,
+              {
+                width: PHOTO_WIDTH,
+                lineBreak: false,
+                ellipsis: true,
+              },
+            );
+        });
+
+      y += rowHeight;
+    }
+
+    drawRule(true);
+  }
+
   model.units.forEach((unit) => {
     ensureSpace(90, () => {});
 
@@ -419,6 +578,8 @@ export async function buildWeeklyInspectionPdf(
 
         drawRule(index === rows.length - 1);
       });
+
+      drawPhotoBlock(inspection, unit.unitName);
     });
 
     y += 12;
@@ -438,7 +599,7 @@ export async function buildWeeklyInspectionPdf(
     .fontSize(12)
     .fillColor(INK)
     .text(
-      `Summary · Week ${model.isoWeek}, ${model.isoYear}`,
+      `Summary · Week ${model.fiscalWeek}, FY ${model.fiscalYearLabel}`,
       MARGIN.left,
       y,
       { width: CONTENT_WIDTH },

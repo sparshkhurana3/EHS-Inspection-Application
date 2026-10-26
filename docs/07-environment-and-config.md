@@ -39,6 +39,26 @@ Read once in `backend/src/config/environment.js` via `dotenv`; the object is fro
 | `FRONTEND_ORIGIN` | no | `http://localhost:5173` | The primary public address: `https://` origin, no path (plain `http` only for `localhost`); the boot fails otherwise. In the CORS `origin` list (no credentials), and where SSO returns a browser that started here or named no allowed origin |
 | `FRONTEND_ADDITIONAL_ORIGINS` | no | — | Comma-separated further `https://` origins of the same deployment, such as the Entra application proxy URL. Validated like `FRONTEND_ORIGIN`, added to the CORS list, and SSO started on one of them returns to it with redirect URI `<origin>/api/auth/entra/callback`, which must be registered ([22](22-entra-app-proxy-plan.md), [ENTRA-APP-PROXY.md](../ENTRA-APP-PROXY.md)) |
 
+### Email alerts (SMTP) — [24](24-hod-escalation-plant-head-photos-plan.md)
+
+All optional. With `SMTP_HOST` empty no email is sent and the scheduler stays off. Setting any other `SMTP_` variable without `SMTP_HOST`, or `SMTP_HOST` without `SMTP_FROM`, or only one of `SMTP_USER`/`SMTP_PASSWORD`, stops the backend at boot with a clear message. `SMTP_PASSWORD` is a credential: it belongs in `.env` and is never logged.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `SMTP_HOST` | — | SMTP server. Empty turns email off |
+| `SMTP_PORT` | `587` | |
+| `SMTP_SECURE` | `false` | `true` for implicit TLS (port 465); `false` uses STARTTLS |
+| `SMTP_REQUIRE_TLS` | `true` | With `SMTP_SECURE=false`, refuse to send without a STARTTLS upgrade |
+| `SMTP_TLS_REJECT_UNAUTHORIZED` | `true` | `false` only for an internal relay with a private certificate |
+| `SMTP_USER`, `SMTP_PASSWORD` | — | Both, or neither for an unauthenticated relay |
+| `SMTP_FROM` | — | Sender, e.g. `EHS Inspection <ehs-alerts@sonacomstar.com>`; required with `SMTP_HOST` |
+| `ALERTS_ENABLED` | `true` | `false` stops the scheduler but leaves `scripts/alerts.js` working |
+| `ALERT_SEND_TIME` | `09:00` | Alerts go out after this time of day (24-hour `HH:MM`) |
+| `ALERT_TIMEZONE` | `Asia/Kolkata` | IANA time zone for the send time and the day counts |
+| `ALERT_CHECK_INTERVAL_MINUTES` | `15` | How often the in-process timer wakes |
+| `HOD_ALERT_DAYS` | `15` | Days after a report is generated before its HOD is emailed (1–365) |
+| `PLANT_HEAD_ALERT_DAYS` | `30` | The same for the Plant Head; must be greater than `HOD_ALERT_DAYS` |
+
 ### Microsoft Entra ID single sign-on
 
 All optional. Leave the first three unset and the app runs on passwords only and does not draw the SSO button; set *some* of the three and the process **fails at boot** rather than at the first sign-in. Administrator setup is [`guide.md`](../guide.md); the design is [18](18-entra-sso-plan.md).

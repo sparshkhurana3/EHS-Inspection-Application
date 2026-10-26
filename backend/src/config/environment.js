@@ -492,6 +492,148 @@ function readPhotoStorageConfiguration() {
   };
 }
 
+/*
+ * Email alerts over SMTP (docs/24). Off unless SMTP_HOST is set, and
+ * strict once it is: a host without a sender, or a user without a
+ * password, is a deployment mistake worth failing at boot rather than
+ * at the first alert.
+ */
+function parseBoolean(name, fallback) {
+  const value = readOptional(name, "").toLowerCase();
+
+  if (value === "") {
+    return fallback;
+  }
+
+  if (value === "true" || value === "false") {
+    return value === "true";
+  }
+
+  throw new Error(
+    `${name} must be "true" or "false", or left empty; got "${value}".`,
+  );
+}
+
+function readEmailConfiguration() {
+  const host = readOptional("SMTP_HOST", "");
+
+  const user = readOptional("SMTP_USER", "");
+  const password = process.env.SMTP_PASSWORD ?? "";
+  const from = readOptional("SMTP_FROM", "");
+
+  if (!host) {
+    if (user || password || from) {
+      throw new Error(
+        "SMTP settings are present but SMTP_HOST is empty. Set SMTP_HOST, or clear the other SMTP_ settings.",
+      );
+    }
+
+    return { isEnabled: false };
+  }
+
+  if (!from) {
+    throw new Error(
+      "SMTP_FROM is required when SMTP_HOST is set, for example EHS Inspection <ehs-alerts@example.com>.",
+    );
+  }
+
+  if (Boolean(user) !== Boolean(password)) {
+    throw new Error(
+      "Set SMTP_USER and SMTP_PASSWORD together, or neither for an unauthenticated relay.",
+    );
+  }
+
+  return {
+    isEnabled: true,
+    host,
+    port: parsePositiveInteger(
+      process.env.SMTP_PORT,
+      587,
+    ),
+    secure: parseBoolean("SMTP_SECURE", false),
+    requireTls: parseBoolean(
+      "SMTP_REQUIRE_TLS",
+      true,
+    ),
+    rejectUnauthorized: parseBoolean(
+      "SMTP_TLS_REJECT_UNAUTHORIZED",
+      true,
+    ),
+    user,
+    password,
+    from,
+  };
+}
+
+function assertTimeZone(value) {
+  try {
+    new Intl.DateTimeFormat("en-GB", {
+      timeZone: value,
+    });
+  } catch {
+    throw new Error(
+      `ALERT_TIMEZONE "${value}" is not a time zone name such as Asia/Kolkata.`,
+    );
+  }
+
+  return value;
+}
+
+function readAlertConfiguration(email) {
+  const sendTime = readOptional(
+    "ALERT_SEND_TIME",
+    "09:00",
+  );
+
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(sendTime)) {
+    throw new Error(
+      `ALERT_SEND_TIME must be HH:MM in 24-hour time; got "${sendTime}".`,
+    );
+  }
+
+  const hodDays = parsePositiveInteger(
+    process.env.HOD_ALERT_DAYS,
+    15,
+  );
+
+  const plantHeadDays = parsePositiveInteger(
+    process.env.PLANT_HEAD_ALERT_DAYS,
+    30,
+  );
+
+  if (
+    hodDays > 365 ||
+    plantHeadDays > 365 ||
+    plantHeadDays <= hodDays
+  ) {
+    throw new Error(
+      "HOD_ALERT_DAYS and PLANT_HEAD_ALERT_DAYS must be whole days up to 365, with the Plant Head's later than the HOD's.",
+    );
+  }
+
+  return {
+    isEnabled:
+      email.isEnabled &&
+      parseBoolean("ALERTS_ENABLED", true),
+    sendTime,
+    timeZone: assertTimeZone(
+      readOptional(
+        "ALERT_TIMEZONE",
+        "Asia/Kolkata",
+      ),
+    ),
+    checkIntervalMinutes: parsePositiveInteger(
+      process.env.ALERT_CHECK_INTERVAL_MINUTES,
+      15,
+    ),
+    hodDays,
+    plantHeadDays,
+  };
+}
+
+const emailConfiguration =
+  readEmailConfiguration();
+
 export const environment = Object.freeze({
   nodeEnvironment:
     process.env.NODE_ENV ?? "development",
@@ -553,5 +695,11 @@ export const environment = Object.freeze({
 
   photoStorage: Object.freeze(
     readPhotoStorageConfiguration(),
+  ),
+
+  email: Object.freeze(emailConfiguration),
+
+  alerts: Object.freeze(
+    readAlertConfiguration(emailConfiguration),
   ),
 });

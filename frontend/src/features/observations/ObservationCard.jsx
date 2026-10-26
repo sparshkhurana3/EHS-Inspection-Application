@@ -1,3 +1,5 @@
+import Alert from "../../components/Alert.jsx";
+
 import { formatDate } from "../../lib/errorMessage.js";
 
 import ObservationItemFields from "./ObservationItemFields.jsx";
@@ -21,6 +23,9 @@ export default function ObservationCard({
   formValues,
   maxObservations,
   maxDescriptionWords,
+  hods,
+  hodsLoading,
+  hodsError,
   submitting,
   onFieldChange,
   onItemFieldChange,
@@ -147,6 +152,83 @@ export default function ObservationCard({
           />
         </div>
 
+        {/*
+          * Mandatory: the HOD gets an email if the auditee has not
+          * closed this report in time (docs/24). Chosen from the HODs of
+          * this location; never the auditee.
+          */}
+        <div className="form-field">
+          <label htmlFor="hodId">
+            HOD of the auditee
+            <span
+              className="required-marker"
+              aria-hidden="true"
+            >
+              {" *"}
+            </span>
+          </label>
+
+          <select
+            id="hodId"
+            required
+            aria-required="true"
+            value={formValues.hodId}
+            disabled={
+              submitting ||
+              hodsLoading ||
+              hods.length === 0
+            }
+            onChange={(event) =>
+              onFieldChange(
+                "hodId",
+                event.target.value,
+              )
+            }
+          >
+            <option value="">
+              {hodsLoading
+                ? "Loading HODs..."
+                : "Select the HOD"}
+            </option>
+
+            {hods.map((hod) => (
+              <option key={hod.id} value={hod.id}>
+                {hod.fullName}
+              </option>
+            ))}
+          </select>
+
+          <small className="form-field-help">
+            Gets an email if the auditee has not
+            closed this report within 15 days.
+          </small>
+        </div>
+
+        {!hodsLoading &&
+        !hodsError &&
+        hods.length === 0 ? (
+          <Alert
+            type="warning"
+            title="No HOD is set up for this location"
+          >
+            Ask the EHS Officer or an administrator to
+            give the HOD role to someone at this
+            location. Until then a report with
+            observations cannot be sent. You can still
+            close an audit with no observation to
+            record.
+          </Alert>
+        ) : null}
+
+        {hodsError ? (
+          <Alert
+            type="error"
+            title="Unable to load the HODs"
+          >
+            {hodsError}
+          </Alert>
+        ) : null}
+
         {areas.length === 0 ? (
           <p className="observation-empty-note">
             No areas are configured for this zone, so
@@ -195,7 +277,12 @@ export default function ObservationCard({
         <button
           type="submit"
           className="button button-primary"
-          disabled={submitting || areas.length === 0}
+          disabled={
+            submitting ||
+            areas.length === 0 ||
+            hodsLoading ||
+            hods.length === 0
+          }
         >
           {submitting
             ? "Sending observation..."

@@ -16,14 +16,21 @@ export const weeklyReportValidationRules = [
       "Week start must be a date in YYYY-MM-DD format.",
     ),
 
-  query("isoYear")
+  query("fiscalYear")
     .optional()
     .matches(/^\d{4}$/)
     .withMessage(
       "Year must be four digits, for example 2026.",
     ),
 
-  query("isoWeek")
+  query("includePhotos")
+    .optional()
+    .isIn(["true", "false"])
+    .withMessage(
+      "Include photographs must be true or false.",
+    ),
+
+  query("fiscalWeek")
     .optional()
     .matches(/^\d{1,2}$/)
     .withMessage(

@@ -21,12 +21,14 @@ import {
   getObservationReport,
   getObservationPhotograph,
   getObservationItemPhotograph,
+  getHodOptions,
   recordNoObservation,
 } from "./observation.controller.js";
 
 import {
   createObservationValidationRules,
   historyValidationRules,
+  hodOptionsValidationRules,
   noObservationValidationRules,
   observationItemIdValidationRules,
   observationReportIdValidationRules,
@@ -57,6 +59,18 @@ router.get(
   historyValidationRules,
   validate,
   getObservationHistory,
+);
+
+/*
+ * The HODs an auditor may name for the auditee of one of their patrols.
+ * Before /:reportId so "hod-options" is never parsed as a report id.
+ */
+router.get(
+  "/hod-options",
+  authenticate,
+  hodOptionsValidationRules,
+  validate,
+  getHodOptions,
 );
 
 router.post(

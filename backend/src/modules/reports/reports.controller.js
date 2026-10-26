@@ -1,3 +1,6 @@
+import * as patrolService
+  from "../patrols/patrol.service.js";
+
 import * as reportsService
   from "./reports.service.js";
 
@@ -8,8 +11,8 @@ function getGeneratedBy(req) {
 function getWeekQuery(req) {
   return {
     weekStart: req.query.weekStart,
-    isoYear: req.query.isoYear,
-    isoWeek: req.query.isoWeek,
+    fiscalYear: req.query.fiscalYear,
+    fiscalWeek: req.query.fiscalWeek,
   };
 }
 
@@ -90,6 +93,8 @@ export async function getWeeklyReportPdf(
       await reportsService.getWeeklyReportPdf({
         userId: req.user.id,
         generatedBy: getGeneratedBy(req),
+        includePhotos:
+          req.query.includePhotos !== "false",
         query: getWeekQuery(req),
       }),
     );
@@ -149,6 +154,50 @@ export async function getYearlyReportPdf(
         year: req.query.year,
       }),
     );
+  } catch (error) {
+    next(error);
+  }
+}
+
+/*
+ * The zone-by-week spreadsheet is built by the patrols module (the Plan
+ * page's download); the Report page offers it too, for the Plant Head as
+ * well as the officer. getInspectionReport scopes it to the caller's own
+ * plant, so reusing it here shares the one builder and the one scope
+ * rule rather than copying them.
+ */
+export async function getZoneWeeksSpreadsheet(
+  req,
+  res,
+  next,
+) {
+  try {
+    const report =
+      await patrolService.getInspectionReport({
+        userId: req.user.id,
+      });
+
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${report.fileName}"`,
+    );
+
+    res.setHeader(
+      "Access-Control-Expose-Headers",
+      "Content-Disposition",
+    );
+
+    res.setHeader(
+      "Cache-Control",
+      "no-store",
+    );
+
+    res.status(200).send(report.buffer);
   } catch (error) {
     next(error);
   }

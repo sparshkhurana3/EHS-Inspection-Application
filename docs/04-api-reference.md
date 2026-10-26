@@ -103,7 +103,7 @@ Body `{ code }` — the one-time code from that redirect, valid two minutes and 
 
 Common fields: `role`, `period {year, month}`, `metricsPeriod`, `metrics`, `audits[]` for the requested month, `nextAudit`, `nextWeek`, `officerWeek`.
 
-**`metricsPeriod`** `{ year, startDate, endDate, scopeName }` — the window the metrics cover. Always **the current year to date**, independent of the `year`/`month` being browsed: paging the calendar moves `audits[]` and `period`, never the metrics. `endDate` is today, or 31 December once that year has passed. `scopeName` is the plant the figures cover, or `null` for a personal scope or a manager with no plant set.
+**`metricsPeriod`** `{ year, yearLabel, startDate, endDate, scopeName }` — the window the metrics cover. Always **the current company year to date** (1 April, [24](24-hod-escalation-plant-head-photos-plan.md) D23), independent of the `year`/`month` being browsed: paging the calendar moves `audits[]` and `period`, never the metrics. `year` is the calendar year the company year starts in and `yearLabel` reads "2026-27". `endDate` is today, or 31 March once that year has passed. `scopeName` is the plant the figures cover, or `null` for a personal scope or a manager with no plant set.
 
 `<audit>`:
 ```json
@@ -149,7 +149,7 @@ One week of the caller's plant for the EHS Officer's week card, so the card can 
 `200 { "officerWeek": <officerWeek> }`, always an object, even for a week with nothing in it. `<officerWeek>`, every date a `"YYYY-MM-DD"` string:
 
 ```json
-{ "weekStart", "weekEnd", "isoWeek", "isCurrentWeek", "isPastWeek", "currentWeekStart",
+{ "weekStart", "weekEnd", "fiscalWeek", "fiscalYearLabel", "isCurrentWeek", "isPastWeek", "currentWeekStart",
   "previousWeekStart", "nextWeekStart", "zoneEditFromDate", "zoneEditToDate", "totalAudits",
   "units": [{ "unitId", "unitName", "unitNumber",
               "zones": [{ "patrolId", "zoneId", "zoneName", "zoneNumber", "scheduledDate", "patrolStatus",
@@ -163,7 +163,7 @@ One week of the caller's plant for the EHS Officer's week card, so the card can 
 | `weekStart`, `weekEnd` | The Monday and the Sunday, both included |
 | `currentWeekStart` | This week's Monday (UTC), for a "back to this week" button |
 | `previousWeekStart`, `nextWeekStart` | The Monday of the nearest earlier / later week that has at least one non-cancelled patrol at the plant, or `null` at either end. Empty weeks are skipped, so the client never does date arithmetic |
-| `zoneEditFromDate`, `zoneEditToDate` | The range a zone edit made from this week reaches: the week's own Monday (for a current or later week that is `max(weekStart, currentWeekStart)`) and 31 December of its year. `null` for a past week. A January audit in the week of 28 Dec – 3 Jan falls outside it and can only be swapped one-off |
+| `zoneEditFromDate`, `zoneEditToDate` | The range a zone edit made from this week reaches: the week's own Monday (for a current or later week that is `max(weekStart, currentWeekStart)`) and the end of the company year (31 March). `null` for a past week. A January audit in the week of 28 Dec – 3 Jan falls outside it and can only be swapped one-off |
 | `status`, `displayStatus` | The zone's progress as code and label: `OPEN` Open (no report), `WITH_AUDITEE` With Auditee, `ACTION_PLAN_IN_PROGRESS` Action Plan being Implemented, `EHS_OFFICER_ACTION_REQUIRED` EHS Officer Action Required, `CLOSED` Closed, `CLOSED_NO_OBSERVATIONS` Closed – no observations (a report but no closure, so `closureId` is `null`) |
 | `canEditAssignment` | The one-off swap of this audit: not a past week, `patrolStatus` is `SCHEDULED` and no report is filed |
 | `reassignableCount` | How many of this zone's audits from `zoneEditFromDate` to `zoneEditToDate` are `SCHEDULED` with no observation report, this row's own included. The same rule the zone edit applies, so it equals the `updatedCount` that edit returns. `0` in a past week |
@@ -178,7 +178,7 @@ Errors: `VALIDATION_ERROR` 400 when `weekStart` is not shaped `YYYY-MM-DD` (`det
 No role check: who may see or file what is decided in the service by patrol membership (auditor, auditee, the patrol's EHS Officer), or plant management where a route says so. An account need not hold `USER`; an Entra sign-in can carry `EHS_OFFICER` alone, and the officer may be a patrol's auditor or auditee.
 
 ### `GET /api/observations/current-assignments`
-Every patrol the caller audits in the current ISO week, **plus** any still-unfiled audit from the previous 4 weeks so a missed deadline does not disappear when the week rolls over. `weekNumber` is the ISO week of `scheduled_date`.
+Every patrol the caller audits in the current week (Monday to Sunday), **plus** any still-unfiled audit from the previous 4 weeks so a missed deadline does not disappear when the week rolls over. `weekNumber` is the ISO week of `scheduled_date`.
 
 `200 { weekStartDate, weekEndDate, pendingCount, submittedCount, overdueCount, assignments[] }`.
 
@@ -186,7 +186,7 @@ Each assignment carries `id, scheduledDate, weekNumber, unitId/unitNumber/unitNa
 
 | Field | Meaning |
 |---|---|
-| `dueDate` | Thursday of the audit's ISO week (Monday + 3 days) |
+| `dueDate` | Thursday of the audit's week (Monday + 3 days) |
 | `isOverdue` | no report yet and today is past `dueDate` (does **not** block submission) |
 | `isFromEarlierWeek` | scheduled before this week's Monday |
 | `reportStatus` | `OPEN` (no report) \| `CLOSED` (a report exists) |
@@ -205,6 +205,9 @@ Body `{ patrolId }`. Closes an open audit the caller audits with nothing to reco
 ### `GET /api/observations/:reportId/items/:itemId/photograph`
 One observation's photograph. Same access rule as the report detail: auditor, auditee, the patrol's EHS Officer, or plant management. Same headers and errors as the report-level photograph route below.
 
+### `GET /api/observations/hod-options?patrolId=`
+The HODs the caller may name for the auditee of one of **their own patrols** (the auditor only; another user's patrol is `404 ASSIGNED_PATROL_NOT_FOUND`): `200 { message, hods: [{ id, fullName, email }] }`, active users with the `HOD` role at the patrol's plant, except the patrol's auditee, ordered by name. Empty when the plant has no HOD, in which case the form refuses a report with observations (a "no observation to record" report still works). Declared before `/:reportId`.
+
 ### `POST /api/observations` — `multipart/form-data`
 
 Files field `photographs`: JPEG/PNG/SVG, ≤10 MB each, **up to 10**, one per observation and **in the same order** as `observations`, stored as `uploads/observations/<uuid>.<ext>`. nginx allows a 110 MB body to fit ten of them. **What is stored is a compressed copy**: each JPEG/PNG is re-encoded after validation (EXIF orientation applied, long edge ≤ 2048 px, JPEG quality 80, metadata stripped). A JPEG stays JPEG; a PNG stays PNG if it is transparent, otherwise it becomes the smaller of JPEG and PNG. SVG is stored as sent. Only real JPEG and PNG content is decoded (an SVG or WebP labelled `image/jpeg` is refused), and images over 120 megapixels are refused. The 10 MB limit applies to the upload, not to the stored file. With `PHOTO_STORAGE=sharepoint` the compressed file is then uploaded to SharePoint before the report is written; if that fails the request answers **503 `PHOTO_STORAGE_UNAVAILABLE`** with a message meant for the user, and nothing is saved.
@@ -213,6 +216,7 @@ Files field `photographs`: JPEG/PNG/SVG, ≤10 MB each, **up to 10**, one per ob
 |---|---|
 | `patrolId` | int ≥1 |
 | `findingDate` | strict ISO 8601 → `Date`; once per report |
+| `hodId` | **required**, int ≥1: the auditee's HOD, an active user with the `HOD` role at the patrol's plant who is not the patrol's auditee (`INVALID_HOD` 400 otherwise; [24](24-hod-escalation-plant-head-photos-plan.md) D3, D4). Stored on `observation_reports.hod_id` and returned as `hodName` on the report and closure |
 | `observations` | JSON-encoded array, 1–10 entries, each `{ zoneAreaId, category (`UA`\|`UC`), description (≤500 words), riskCategory (`HIGH`\|`MEDIUM`\|`LOW`) }`. Errors name the position: "Observation 2: …" |
 
 The report's own `observation_location`, `category`, `description`, `risk_category`, `photograph_*` and `zone_area_id` columns are filled from **observation #1**, so readers that predate multi-observation support are unaffected.
@@ -237,9 +241,9 @@ Caller must be the patrol's auditor, auditee, or EHS officer. Path is resolved u
 `200` raw bytes, `Content-Type` from the stored MIME, `Content-Disposition: inline; filename="…"`, `Cache-Control: private, max-age=300`.
 Errors: `OBSERVATION_PHOTOGRAPH_NOT_FOUND` 404, `OBSERVATION_PHOTOGRAPH_FILE_NOT_FOUND` 404, `INVALID_PHOTOGRAPH_PATH` 500.
 
-## Closures — all routes `authenticate`; the approval queue, approve and reject add `authorize(...MANAGEMENT_ROLES)`
+## Closures — all routes `authenticate`; the approval queue, approve and reject add `authorize(...PLANNING_ROLES)` (EHS Officer, Admin)
 
-As with observations, access is patrol membership checked in SQL, not a role: the auditee works the closure, and the auditor, the patrol's EHS Officer and the reviewer can read it.
+As with observations, access is patrol membership checked in SQL, not a role: the auditee works the closure, and the auditor, the patrol's EHS Officer and the reviewer can read it. **Reading** (`GET /:closureId` and its evidence photographs) is also open to a management user (EHS Officer, HOD, Plant Head, Admin) at the same plant (`findClosureByIdForViewer`); every write keeps its own check, so seeing a closure never lets a Plant Head or HOD edit, approve or reject it. **Approving and rejecting are the EHS Officer's alone** ([24](24-hod-escalation-plant-head-photos-plan.md) A2): HOD and Plant Head get `403 INSUFFICIENT_PERMISSIONS`.
 
 `<closure>` also carries `items[]` — one entry per observation, `{ id, sequenceNumber, observation: { areaName, category, description, riskCategory }, actionPlan, targetDate, actionPlanSavedAt, evidence: [{ id, originalName, mimeType, size, uploadedAt }], evidenceCount, canEdit, canAddEvidence }` — plus `itemCount`, `plannedItemCount`, `evidenceCount`, `maxEvidencePerObservation` (3), and `canSubmitForClosure` (true once every observation has a plan; evidence does not gate it). `displayStatus` is `Open` / `In Progress` / `Pending Approval` / `Closed`.
 
@@ -288,13 +292,13 @@ No body. `closureId` is **not validated** (route passes `validate` with no rules
 `200 { "message": "Report sent for closure successfully.", "closure": <closure> }`
 Errors: `CLOSURE_ASSIGNMENT_NOT_FOUND` 404, `CLOSURE_NOT_IN_PROGRESS` 409, `INCOMPLETE_CLOSURE_REPORT` 400, `CLOSURE_STATUS_CHANGED` 409, `CLOSURE_SUBMISSION_FAILED` 409, `SUBMITTED_CLOSURE_NOT_FOUND` 500.
 
-### `GET /api/closures/pending-approvals` — `MANAGEMENT_ROLES`
+### `GET /api/closures/pending-approvals` — `PLANNING_ROLES`
 The EHS Officer's review queue: closures in `SUBMITTED_FOR_CLOSURE` on patrols whose `ehs_officer_id` is the caller **or is null**, oldest submission first. **It is not plant-wide**: another officer's patrols at the same plant do not appear (`admin.js reassign-officer` moves them), and an HOD or Plant Head who planned nothing sees only the patrols with no officer. Closures on which the caller is the auditee are included. `200 { closures: [<closure>] }`.
 
-### `POST /api/closures/:closureId/approve` — `MANAGEMENT_ROLES`
+### `POST /api/closures/:closureId/approve` — `PLANNING_ROLES`
 Body `{ reviewComments }` optional. In one transaction the closure → `APPROVED`, the patrol → `COMPLETED` and the report → `CLOSED`. **This is the only path that ends an inspection that had findings.**
 
-### `POST /api/closures/:closureId/reject` — `MANAGEMENT_ROLES`
+### `POST /api/closures/:closureId/reject` — `PLANNING_ROLES`
 Body `{ reviewComments }` **required** (3–1000 chars, `REVIEW_COMMENTS_REQUIRED` 400). Closure → `REEXAMINATION_REQUIRED` with `approval_iteration` advanced, patrol and report likewise, and every observation open for rework.
 
 Both: `CLOSURE_ASSIGNMENT_NOT_FOUND` 404, `CLOSURE_NOT_AWAITING_APPROVAL` 409, `CLOSURE_STATUS_CHANGED` 409 (another reviewer got there first).
@@ -316,34 +320,39 @@ Only the caller's plant: its active units and zones, each zone with its active a
 
 ## Reports (`/api/reports`)
 
-The weekly and yearly inspection reports ([23](23-reports-page-plan.md), which moved the weekly report here from `/api/patrols/weekly-report`). **EHS Officer only** (`REPORT_ROLES`; not `ADMIN`), scoped to the caller's own plant (`403 OFFICER_LOCATION_NOT_SET` when none). Built with `pdfkit` (`reports/weeklyInspectionPdf.js`, `yearlyInspectionPdf.js`, shared `pdfLayout.js`). Each report is built once as a raw model (ISO dates, codes, ready-made labels), returned as JSON for the Report page and handed to the PDF builder, so the screen and the PDF never disagree.
+The weekly and yearly inspection reports ([23](23-reports-page-plan.md), which moved the weekly report here from `/api/patrols/weekly-report`). **EHS Officer and Plant Head** (`REPORT_ROLES`; not `ADMIN`), scoped to the caller's own plant (`403 OFFICER_LOCATION_NOT_SET` when none). Built with `pdfkit` (`reports/weeklyInspectionPdf.js`, `yearlyInspectionPdf.js`, shared `pdfLayout.js`). Each report is built once as a raw model (ISO dates, codes, ready-made labels), returned as JSON for the Report page and handed to the PDF builder, so the screen and the PDF never disagree.
 
 | Method and path | Query | Returns |
 |---|---|---|
-| `GET /api/reports/weekly/weeks` | – | `{ message, location, currentWeekStart, weeks: [{ weekStart, weekEnd, isoWeek, isoYear, zoneCount, reportCount }] }`. Weeks with at least one non-cancelled audit, 52 weeks back to the current week, newest first. `reportCount` is audits with a report, not zones |
-| `GET /api/reports/weekly` | `weekStart=YYYY-MM-DD` (moved to its Monday), **or** `isoYear=YYYY&isoWeek=N` | `{ message, report }`: `type`, `plant`, `weekStart`, `weekEnd`, `isoWeek`, `isoYear`, `dueDate`, `generatedAt`, `units[].inspections[]` (`patrolId`, `zoneId`, `zoneName`, `scheduledDate`, `auditorName`, `auditeeName`, `outcome` `NOT_DONE`/`NO_OBSERVATIONS`/`OBSERVATIONS`, `notYetDue`, `reportNumber`, `closureStatus`, `closureLabel`, `reviewComments`, `observations[]`) and `summary` |
-| `GET /api/reports/weekly/pdf` | the same | PDF `weekly-inspection-report-<plant>-<isoYear>-w<NN>.pdf` |
+| `GET /api/reports/weekly/weeks` | – | `{ message, location, currentWeekStart, weeks: [{ weekStart, weekEnd, fiscalWeek, fiscalYear, fiscalYearLabel, zoneCount, reportCount }] }`. Weeks with at least one non-cancelled audit, 52 weeks back to the current week, newest first. `reportCount` is audits with a report, not zones |
+| `GET /api/reports/weekly` | `weekStart=YYYY-MM-DD` (moved to its Monday), **or** `fiscalYear=YYYY&fiscalWeek=N` (the week number of the company year, counted from the first Monday on or after 1 April, and the year it starts in) | `{ message, report }`: `type`, `plant`, `weekStart`, `weekEnd`, `fiscalWeek`, `fiscalYear`, `fiscalYearLabel`, `dueDate`, `generatedAt`, `units[].inspections[]` (`patrolId`, `reportId`, `zoneId`, `zoneName`, `scheduledDate`, `auditorName`, `auditeeName`, `hodName`, `outcome` `NOT_DONE`/`NO_OBSERVATIONS`/`OBSERVATIONS`, `notYetDue`, `reportNumber`, `closureStatus`, `closureLabel`, `reviewComments`, `observations[]`) and `summary` |
+| `GET /api/reports/weekly/pdf` | the same | PDF `weekly-inspection-report-<plant>-fy<2026-27>-w<NN>.pdf`. Optional `includePhotos=false` leaves the photographs out (default: included) |
 | `GET /api/reports/yearly/years` | – | `{ message, location, currentYear, years: [{ year, scheduledCount, conductedCount }] }`, newest first, always including the current year |
 | `GET /api/reports/yearly` | `year=YYYY` | `{ message, report }`: `type`, `plant`, `year`, `fromDate`, `cutoffDate`, `isPartialYear`, `generatedAt`, `totals`, `units[]` (`totals`, `zones[]` with `totals` and `weeks[]`) |
 | `GET /api/reports/yearly/pdf` | `year` | PDF `yearly-inspection-report-<plant>-<year>.pdf` |
 
 PDF responses carry `Content-Type: application/pdf`, `Content-Disposition: attachment`, `Access-Control-Expose-Headers: Content-Disposition` and `Cache-Control: no-store`. JSON reports are `no-store` too.
 
+**Photographs** ([24](24-hod-escalation-plant-head-photos-plan.md) D19–D22): the weekly PDF follows each inspection's rows with up to four observation photographs per row, each fitted in a 175 × 130 pt frame labelled "Obs n · area". Every photograph is read from the uploads volume or SharePoint (`readStoredFile`), turned into a JPEG of at most 800 px on its long side, four at a time with a 20 s limit each. An SVG, a missing file or one that will not decode becomes a placeholder naming the report. The JSON model carries `itemId` on each observation; the page loads a photograph lazily through `GET /api/observations/:reportId/items/:itemId/photograph` when its row is expanded.
+
 **Weekly rules**: one block per non-cancelled audit scheduled in the Monday-to-Sunday week. Red **Not done** (with "Due by Thu …" while Thursday has not passed), green **Inspected · No observation to record** or **Inspected · N observations** with each observation, action plan, target date, evidence count and closure status. A zone with more than one audit that week counts as inspected only when every one has a report. No photographs.
 
-**Yearly rules**: 1 January to today (current year) or to 31 December (past year). Every active zone is listed; one with nothing scheduled is "Not scheduled" and left out of every percentage. `Totals` = `scheduled`, `conducted`, `notConducted`, `completionPercent` (conducted ÷ scheduled, rounded, `null` when nothing scheduled), `completionBand` (`COMPLETE` 100, `ON_TRACK` 75–99, `BEHIND` below 75), `observationReports` (reports with findings), `noObservationReports`, `observations` (items), `closuresApproved` (`APPROVED`), `closuresOpen` (every other closure), `zonesScheduled`, `zonesNotScheduled`. Unit and location totals are sums of their zones with the percentage recomputed from the sums.
+**Yearly rules**: the company year, 1 April to today (current year) or to the following 31 March (past year); `year` is the year it starts in and the model carries `yearLabel` ("2026-27"). Every active zone is listed; one with nothing scheduled is "Not scheduled" and left out of every percentage. `Totals` = `scheduled`, `conducted`, `notConducted`, `completionPercent` (conducted ÷ scheduled, rounded, `null` when nothing scheduled), `completionBand` (`COMPLETE` 100, `ON_TRACK` 75–99, `BEHIND` below 75), `observationReports` (reports with findings), `noObservationReports`, `observations` (items), `closuresApproved` (`APPROVED`), `closuresOpen` (every other closure), `zonesScheduled`, `zonesNotScheduled`. Unit and location totals are sums of their zones with the percentage recomputed from the sums.
 
 | Status | Code | When |
 |---|---|---|
-| 400 | `VALIDATION_ERROR` | `weekStart`, `isoYear`, `isoWeek` or `year` has the wrong shape |
+| 400 | `VALIDATION_ERROR` | `weekStart`, `fiscalYear`, `fiscalWeek`, `includePhotos` or `year` has the wrong shape |
 | 400 | `INVALID_WEEK_START` | not a real date, or no week given |
-| 400 | `INVALID_ISO_WEEK` | week 0 or above 53, week 53 of a 52-week year, or a year before 2000 |
+| 400 | `INVALID_FISCAL_WEEK` | week 0 or above 53, week 53 of a 52-week year, or a year before 2000 |
 | 400 | `WEEK_NOT_STARTED` | the week begins after the current week |
 | 400 | `INVALID_YEAR` | `year` before 2000 |
 | 400 | `YEAR_NOT_STARTED` | `year` after the current year |
-| 403 | `INSUFFICIENT_PERMISSIONS` | the caller is not an EHS Officer |
+| 403 | `INSUFFICIENT_PERMISSIONS` | the caller is not an EHS Officer or Plant Head |
 | 403 | `OFFICER_LOCATION_NOT_SET` | the account has no plant |
 | 404 | `NO_INSPECTIONS_IN_WEEK` | nothing was scheduled at the plant that week (a year with nothing is not a 404) |
+
+### `GET /api/reports/zone-weeks.xlsx` — `REPORT_ROLES`
+The same zone-by-week spreadsheet as `GET /api/patrols/inspection-report` below, for the Report page and for the Plant Head as well as the officer (the patrols route stays `PLANNING_ROLES` for the Plan page). Scoped to the caller's own plant. The `W<n>` columns count weeks of the company year.
 
 ### `GET /api/patrols/inspection-report`
 The zone-by-week inspection report as an `.xlsx` download, scoped to the officer's own plant and covering **the current year up to today**. Declared before `/:patrolId/assignment` so the literal path is never parsed as a patrol id.

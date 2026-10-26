@@ -148,6 +148,8 @@ export async function findWeekPatrolsForReport(
         report.report_number,
         report.no_observations,
 
+        hod.full_name AS hod_name,
+
         closure.id AS closure_id,
         closure.status AS closure_status,
         closure.approval_iteration,
@@ -176,6 +178,9 @@ export async function findWeekPatrolsForReport(
 
       LEFT JOIN observation_reports AS report
         ON report.patrol_id = patrol.id
+
+      LEFT JOIN users AS hod
+        ON hod.id = report.hod_id
 
       LEFT JOIN closure_requests AS closure
         ON closure.observation_report_id = report.id
@@ -218,6 +223,7 @@ export async function findWeekPatrolsForReport(
         ? null
         : Number(row.report_id),
     reportNumber: row.report_number ?? null,
+    hodName: row.hod_name ?? null,
     noObservations:
       row.no_observations === true,
     closureStatus: row.closure_status ?? null,
@@ -244,8 +250,11 @@ export async function findReportItemsForReport(
   const result = await client.query(
     `
       SELECT
+        item.id AS item_id,
         item.observation_report_id,
         item.sequence_number,
+        item.photograph_path,
+        item.photograph_mime_type,
         item.category,
         item.risk_category,
         item.description,
@@ -290,7 +299,11 @@ export async function findReportItemsForReport(
   );
 
   return result.rows.map((row) => ({
+    itemId: Number(row.item_id),
     reportId: Number(row.observation_report_id),
+    photographPath: row.photograph_path ?? null,
+    photographMimeType:
+      row.photograph_mime_type ?? null,
     sequenceNumber: row.sequence_number,
     category: row.category,
     riskCategory: row.risk_category,
@@ -303,7 +316,7 @@ export async function findReportItemsForReport(
 }
 
 /**
- * The calendar years that had a non-cancelled audit at a plant, up to
+ * The company years (1 April to 31 March) that had a non-cancelled audit at a plant, up to
  * today, newest first, with how many were scheduled and conducted. The
  * service adds the current year when it is missing.
  */
@@ -317,8 +330,15 @@ export async function findInspectionYears(
   const result = await client.query(
     `
       SELECT
+        /*
+         * The company year starts on 1 April, so three months back puts
+         * April on January: 2026-04-01 and 2027-03-31 both fall in 2026.
+         */
         EXTRACT(
-          YEAR FROM patrol.scheduled_date
+          YEAR FROM (
+            patrol.scheduled_date
+            - INTERVAL '3 months'
+          )
         )::INTEGER AS year,
 
         COUNT(*)::INTEGER AS scheduled_count,

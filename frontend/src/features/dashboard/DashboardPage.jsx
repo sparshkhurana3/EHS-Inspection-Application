@@ -6,6 +6,7 @@ import LoadingSpinner from "../../components/LoadingSpinner.jsx";
 import PatrolCalendar from "../patrols/PatrolCalendar.jsx";
 
 import {
+  canPlanAudits,
   hasManagementRole,
   normalizeRole,
 } from "../../constants/roles.js";
@@ -282,8 +283,14 @@ export default function DashboardPage() {
             />
           ) : null}
 
-          {normalizeRole(role) ===
-          "EHS_OFFICER" ? (
+          {/*
+            * The officer's week card, which the Plant Head sees too,
+            * read-only: the API marks every row uneditable for them
+            * (docs/24 D15).
+            */}
+          {["EHS_OFFICER", "PLANT_HEAD"].includes(
+            normalizeRole(role),
+          ) ? (
             <OfficerWeekCard
               week={officerWeekView.week}
               loading={
@@ -308,6 +315,7 @@ export default function DashboardPage() {
               onReload={
                 officerWeekView.reload
               }
+              canEdit={canPlanAudits(user)}
             />
           ) : (
             <WeeklySummary

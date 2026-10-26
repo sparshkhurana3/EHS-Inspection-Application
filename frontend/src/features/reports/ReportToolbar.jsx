@@ -1,4 +1,5 @@
 import {
+  formatFiscalYear,
   formatReportDate,
   weekLabel,
 } from "./reportFormat.js";
@@ -30,8 +31,12 @@ export default function ReportToolbar({
   canGenerate,
   generating,
   downloading,
+  includePhotos,
+  onIncludePhotosChange,
   onGenerate,
   onDownload,
+  onDownloadSpreadsheet,
+  downloadingSpreadsheet,
 }) {
   const jumpIncomplete =
     (jumpWeek === "") !== (jumpYear === "");
@@ -111,7 +116,7 @@ export default function ReportToolbar({
                 max="53"
                 inputMode="numeric"
                 className="report-jump-input"
-                aria-label="ISO week number"
+                aria-label="Week number of the company year"
                 placeholder="14"
                 value={jumpWeek}
                 onChange={(event) =>
@@ -122,7 +127,7 @@ export default function ReportToolbar({
                 disabled={generating}
               />
 
-              of
+              of the year starting April
 
               <input
                 type="number"
@@ -130,8 +135,8 @@ export default function ReportToolbar({
                 max="2999"
                 inputMode="numeric"
                 className="report-jump-input report-jump-input-year"
-                aria-label="Year"
-                placeholder="2024"
+                aria-label="Year the company year starts in"
+                placeholder="2025"
                 value={jumpYear}
                 onChange={(event) =>
                   onJumpYearChange(
@@ -163,9 +168,13 @@ export default function ReportToolbar({
                   key={entry.year}
                   value={entry.year}
                 >
-                  {entry.year === currentYear
-                    ? `${entry.year} (year to date)`
-                    : entry.year}
+                  {`FY ${formatFiscalYear(
+                    entry.year,
+                  )}${
+                    entry.year === currentYear
+                      ? " (year to date)"
+                      : ""
+                  }`}
                 </option>
               ))}
             </select>
@@ -201,12 +210,41 @@ export default function ReportToolbar({
             ? "Preparing..."
             : "Download PDF (full report)"}
         </button>
+
+        {tab === "weekly" ? (
+          <label className="observation-history-filter">
+            <input
+              type="checkbox"
+              checked={includePhotos}
+              onChange={(event) =>
+                onIncludePhotosChange(
+                  event.target.checked,
+                )
+              }
+            />
+            Include photographs in the PDF
+          </label>
+        ) : (
+          <button
+            type="button"
+            className="button button-secondary"
+            onClick={onDownloadSpreadsheet}
+            disabled={downloadingSpreadsheet}
+          >
+            {downloadingSpreadsheet
+              ? "Preparing..."
+              : "Download zone-by-week spreadsheet (.xlsx)"}
+          </button>
+        )}
       </div>
 
       {jumpIncomplete ? (
         <p className="report-toolbar-hint">
-          Enter both a week number and a year, or
-          clear them to use the list.
+          Enter both a week number and the year the
+          company year starts in (2025 for April
+          2025 to March 2026), or clear them to use
+          the list. Week 1 starts on the first
+          Monday on or after 1 April.
         </p>
       ) : null}
 
@@ -221,12 +259,13 @@ export default function ReportToolbar({
 
       {tab === "weekly" ? null : (
         <p className="report-toolbar-hint">
-          The yearly report runs from{" "}
+          The yearly report is for the company year
+          that runs from{" "}
           {formatReportDate(
-            `${selectedYear || currentYear}-01-01`,
+            `${selectedYear || currentYear}-04-01`,
           )}{" "}
           to today for the current year, or to 31
-          December for a past year.
+          March for a past year.
         </p>
       )}
     </section>

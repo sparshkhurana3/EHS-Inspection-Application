@@ -76,6 +76,22 @@ services:
       # volume) or "sharepoint" (a document library via Microsoft
       # Graph). The volume stays mounted either way: uploads are staged
       # there, and photographs taken before a switch still live there.
+      # Email alerts over SMTP. Empty SMTP_HOST turns them off. See
+      # .env.example and SETUP-GUIDE.md ("Email alerts").
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_SECURE: ${SMTP_SECURE:-}
+      SMTP_REQUIRE_TLS: ${SMTP_REQUIRE_TLS:-}
+      SMTP_TLS_REJECT_UNAUTHORIZED: ${SMTP_TLS_REJECT_UNAUTHORIZED:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      ALERTS_ENABLED: ${ALERTS_ENABLED:-}
+      ALERT_SEND_TIME: ${ALERT_SEND_TIME:-}
+      ALERT_TIMEZONE: ${ALERT_TIMEZONE:-}
+      ALERT_CHECK_INTERVAL_MINUTES: ${ALERT_CHECK_INTERVAL_MINUTES:-}
+      HOD_ALERT_DAYS: ${HOD_ALERT_DAYS:-}
+      PLANT_HEAD_ALERT_DAYS: ${PLANT_HEAD_ALERT_DAYS:-}
       PHOTO_STORAGE: ${PHOTO_STORAGE:-local}
       SHAREPOINT_SITE_URL: ${SHAREPOINT_SITE_URL:-}
       SHAREPOINT_SITE_ID: ${SHAREPOINT_SITE_ID:-}

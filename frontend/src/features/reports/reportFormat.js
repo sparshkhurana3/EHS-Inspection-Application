@@ -65,9 +65,21 @@ export function completionBandClass(band) {
   return "";
 }
 
+/**
+ * "2026-27" for the company year that starts in April 2026.
+ */
+export function formatFiscalYear(fiscalYear) {
+  const year = Number(fiscalYear);
+
+  return `${year}-${String(
+    (year + 1) % 100,
+  ).padStart(2, "0")}`;
+}
+
 export function weekLabel(week) {
-  return `W${week.isoWeek} ${
-    week.isoYear
+  return `W${week.fiscalWeek} FY ${
+    week.fiscalYearLabel ??
+    formatFiscalYear(week.fiscalYear)
   } · ${formatReportDate(
     week.weekStart,
   )} to ${formatReportDate(week.weekEnd)}`;

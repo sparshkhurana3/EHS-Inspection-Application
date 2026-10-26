@@ -7,6 +7,7 @@ import {
 import {
   fetchReport,
   fetchReportPdf,
+  fetchZoneWeeksSpreadsheet,
 } from "./reports.service.js";
 
 import {
@@ -30,6 +31,11 @@ export default function useReport() {
 
   const [downloading, setDownloading] =
     useState(false);
+
+  const [
+    downloadingSpreadsheet,
+    setDownloadingSpreadsheet,
+  ] = useState(false);
 
   const [error, setError] = useState("");
 
@@ -117,6 +123,48 @@ export default function useReport() {
     [downloading],
   );
 
+  /**
+   * The zone-by-week spreadsheet, saved the same way as a PDF.
+   */
+  const downloadSpreadsheet = useCallback(
+    async (fileName) => {
+      if (downloadingSpreadsheet) {
+        return;
+      }
+
+      setDownloadingSpreadsheet(true);
+      setError("");
+
+      let objectUrl = null;
+
+      try {
+        const blob =
+          await fetchZoneWeeksSpreadsheet();
+
+        objectUrl = URL.createObjectURL(blob);
+
+        const link =
+          document.createElement("a");
+
+        link.href = objectUrl;
+        link.download = fileName;
+
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      } catch (requestError) {
+        setError(getErrorMessage(requestError));
+      } finally {
+        if (objectUrl) {
+          URL.revokeObjectURL(objectUrl);
+        }
+
+        setDownloadingSpreadsheet(false);
+      }
+    },
+    [downloadingSpreadsheet],
+  );
+
   const clear = useCallback(() => {
     requestCounter.current += 1;
 
@@ -129,9 +177,11 @@ export default function useReport() {
     report,
     generating,
     downloading,
+    downloadingSpreadsheet,
     error,
     generate,
     download,
+    downloadSpreadsheet,
     clear,
   };
 }

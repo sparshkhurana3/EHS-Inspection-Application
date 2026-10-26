@@ -1,14 +1,39 @@
+import path from "node:path";
+
+import sharp from "sharp";
+
 import AppError from "../../shared/errors/AppError.js";
+
+import {
+  logger,
+} from "../../config/logger.js";
+
+import {
+  readStoredFile,
+} from "../../shared/storage/storedFiles.js";
+
+/*
+ * Loaded for its side effect: it restricts sharp to the JPEG and PNG
+ * decoders (docs/24 D21), which must also hold for the photographs
+ * decoded here. An SVG is never decoded by this module.
+ */
+import "../../middleware/compressUploadedImages.js";
 
 import * as reportsRepository
   from "./reports.repository.js";
 
 import {
+  formatFiscalYear,
+  getFiscalYearOfDate,
+  getFiscalYearRange,
+} from "../../shared/fiscalYear.js";
+
+import {
   addDays,
   formatReportDate,
-  getIsoWeekMonday,
-  getIsoWeekNumber,
-  getIsoYear,
+  getFiscalWeekMondayOf,
+  getFiscalWeekNumberOf,
+  getFiscalYearOfWeek,
   getMondayOnOrBefore,
   toDateOnlyString,
   toValidDateOnly,
@@ -134,11 +159,12 @@ function toClosureBucket(closureStatus) {
 
 /**
  * The Monday of the week asked for, from either a date inside it or an
- * ISO year and week number (docs/23 D12). A week that has not started
- * is refused.
+ * year and week number of the company year (docs/23 D12, docs/24 D23),
+ * which starts on 1 April: week 1 is the first Monday on or after it.
+ * A week that has not started is refused.
  */
 function resolveWeekStart(
-  { weekStart, isoYear, isoWeek },
+  { weekStart, fiscalYear, fiscalWeek },
   today,
 ) {
   let monday;
@@ -156,22 +182,22 @@ function resolveWeekStart(
 
     monday = getMondayOnOrBefore(validDate);
   } else if (
-    isoYear !== undefined &&
-    isoWeek !== undefined
+    fiscalYear !== undefined &&
+    fiscalWeek !== undefined
   ) {
-    const year = Number.parseInt(isoYear, 10);
-    const week = Number.parseInt(isoWeek, 10);
+    const year = Number.parseInt(fiscalYear, 10);
+    const week = Number.parseInt(fiscalWeek, 10);
 
     monday =
       year >= 2000
-        ? getIsoWeekMonday(year, week)
+        ? getFiscalWeekMondayOf(year, week)
         : null;
 
     if (!monday) {
       throw new AppError(
-        "That week does not exist. Enter a week number from 1 to 52 (53 in some years) and a year from 2000.",
+        "That week does not exist. Enter a week number from 1 to 52 (53 in some years) and the year the company year starts in (for April 2026 to March 2027, 2026).",
         400,
-        "INVALID_ISO_WEEK",
+        "INVALID_FISCAL_WEEK",
       );
     }
   } else {
@@ -233,10 +259,13 @@ export async function getWeeklyReportWeeks({
     weeks: weeks.map((week) => ({
       weekStart: week.weekStart,
       weekEnd: addDays(week.weekStart, 6),
-      isoWeek: getIsoWeekNumber(
+      fiscalWeek: getFiscalWeekNumberOf(
         week.weekStart,
       ),
-      isoYear: getIsoYear(week.weekStart),
+      fiscalYear: getFiscalYearOfWeek(week.weekStart),
+      fiscalYearLabel: formatFiscalYear(
+        getFiscalYearOfWeek(week.weekStart),
+      ),
       zoneCount: week.zoneCount,
       reportCount: week.reportCount,
     })),
@@ -286,7 +315,18 @@ async function buildWeeklyReportModel({
 
   const itemsByReport = new Map();
 
+  /*
+   * Where each observation's photograph is stored, for the PDF only.
+   * It stays out of the JSON model, which the page draws.
+   */
+  const photoRefs = new Map();
+
   items.forEach((item) => {
+    photoRefs.set(item.itemId, {
+      path: item.photographPath,
+      mimeType: item.photographMimeType,
+    });
+
     if (!itemsByReport.has(item.reportId)) {
       itemsByReport.set(item.reportId, []);
     }
@@ -351,6 +391,7 @@ async function buildWeeklyReportModel({
               patrol.reportId,
             ) ?? []
           ).map((item) => ({
+            itemId: item.itemId,
             sequenceNumber:
               item.sequenceNumber,
             areaName: item.areaName,
@@ -373,11 +414,13 @@ async function buildWeeklyReportModel({
 
     unit.inspections.push({
       patrolId: patrol.patrolId,
+      reportId: patrol.reportId,
       zoneId: patrol.zoneId,
       zoneName: patrol.zoneName,
       scheduledDate: patrol.scheduledDate,
       auditorName: patrol.auditorName,
       auditeeName: patrol.auditeeName,
+      hodName: patrol.hodName,
       outcome,
       notYetDue:
         outcome === "NOT_DONE" &&
@@ -465,7 +508,7 @@ async function buildWeeklyReportModel({
     }
   });
 
-  return {
+  const model = {
     type: "WEEKLY",
     plant: {
       name: location.name,
@@ -473,40 +516,177 @@ async function buildWeeklyReportModel({
     },
     weekStart,
     weekEnd,
-    isoWeek: getIsoWeekNumber(weekStart),
-    isoYear: getIsoYear(weekStart),
+    fiscalWeek: getFiscalWeekNumberOf(weekStart),
+    fiscalYear: getFiscalYearOfWeek(weekStart),
+    fiscalYearLabel: formatFiscalYear(
+      getFiscalYearOfWeek(weekStart),
+    ),
     dueDate,
     generatedAt: today,
     units,
     summary,
   };
+
+  return { model, photoRefs };
 }
 
 export async function getWeeklyReport(input) {
+  const { model } =
+    await buildWeeklyReportModel(input);
+
   return {
     message: "Weekly inspection report loaded.",
-    report: await buildWeeklyReportModel(input),
+    report: model,
   };
+}
+
+/*
+ * The photographs in the PDF (docs/24 D21): each is read, turned into
+ * a JPEG at most 800 px on its long side, and embedded. SVG, a missing
+ * file and a file that will not decode all become a placeholder, so one
+ * bad photograph never loses the report. Fetched four at a time, with a
+ * limit on each, because with SharePoint storage every one is a
+ * download.
+ */
+const PHOTO_CONCURRENCY = 4;
+const PHOTO_TIMEOUT_MILLISECONDS = 20 * 1000;
+const PHOTO_MAX_SIDE = 800;
+
+async function loadPdfPhoto(reference) {
+  if (!reference?.path) {
+    return null;
+  }
+
+  const looksLikeSvg =
+    String(reference.mimeType ?? "")
+      .toLowerCase()
+      .includes("svg") ||
+    /\.svg$/i.test(reference.path);
+
+  if (looksLikeSvg) {
+    return null;
+  }
+
+  const bytes = await readStoredFile(
+    reference.path,
+    {
+      allowedDirectory: path.resolve(
+        process.cwd(),
+        "uploads",
+        "observations",
+      ),
+    },
+  );
+
+  return sharp(bytes)
+    .rotate()
+    .resize({
+      width: PHOTO_MAX_SIDE,
+      height: PHOTO_MAX_SIDE,
+      fit: "inside",
+      withoutEnlargement: true,
+    })
+    .jpeg({ quality: 70 })
+    .toBuffer();
+}
+
+async function withTimeout(promise, milliseconds) {
+  let timer;
+
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(
+          () =>
+            reject(
+              new Error(
+                "The photograph took too long to read.",
+              ),
+            ),
+          milliseconds,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function loadPdfPhotos(photoRefs, itemIds) {
+  const photos = new Map();
+  const queue = [...itemIds];
+
+  async function worker() {
+    while (queue.length > 0) {
+      const itemId = queue.shift();
+
+      try {
+        photos.set(
+          itemId,
+          await withTimeout(
+            loadPdfPhoto(photoRefs.get(itemId)),
+            PHOTO_TIMEOUT_MILLISECONDS,
+          ),
+        );
+      } catch (error) {
+        photos.set(itemId, null);
+
+        logger.warn(
+          "A photograph could not be added to the weekly report PDF.",
+          {
+            itemId,
+            reason: error.message,
+          },
+        );
+      }
+    }
+  }
+
+  await Promise.all(
+    Array.from(
+      { length: PHOTO_CONCURRENCY },
+      worker,
+    ),
+  );
+
+  return photos;
 }
 
 export async function getWeeklyReportPdf({
   generatedBy,
+  includePhotos = true,
   ...input
 }) {
-  const model =
+  const { model, photoRefs } =
     await buildWeeklyReportModel(input);
+
+  const photos = includePhotos
+    ? await loadPdfPhotos(
+        photoRefs,
+        model.units.flatMap((unit) =>
+          unit.inspections.flatMap(
+            (inspection) =>
+              inspection.observations.map(
+                (observation) =>
+                  observation.itemId,
+              ),
+          ),
+        ),
+      )
+    : null;
 
   return {
     buffer: await buildWeeklyInspectionPdf(
       model,
-      { generatedBy },
+      { generatedBy, photos },
     ),
 
     fileName: toFileName([
       "weekly-inspection-report",
       model.plant.code ?? model.plant.name,
-      model.isoYear,
-      `w${String(model.isoWeek).padStart(2, "0")}`,
+      `fy${model.fiscalYearLabel}`,
+      `w${String(model.fiscalWeek).padStart(2, "0")}`,
     ]),
   };
 }
@@ -606,7 +786,7 @@ function validateYear(yearValue, today) {
     );
   }
 
-  if (year > Number(today.slice(0, 4))) {
+  if (year > getFiscalYearOfDate(today)) {
     throw new AppError(
       "Choose a year that has already started.",
       400,
@@ -630,7 +810,7 @@ export async function getYearlyReportYears({
     await requireOfficerLocation(userId);
 
   const today = getToday(referenceDate);
-  const currentYear = Number(today.slice(0, 4));
+  const currentYear = getFiscalYearOfDate(today);
 
   const years =
     await reportsRepository.findInspectionYears({
@@ -664,8 +844,8 @@ export async function getYearlyReportYears({
 }
 
 /**
- * One calendar year, 1 January to today (or to 31 December for a past
- * year). Every active zone is listed, including zones with nothing
+ * One company year, 1 April to today (or to the following 31 March for
+ * a past year). Every active zone is listed, including zones with nothing
  * scheduled, which are left out of every percentage (docs/23 D8, D9).
  * "Closures" means closures approved; every other closure is open.
  */
@@ -680,13 +860,14 @@ async function buildYearlyReportModel({
     await requireOfficerLocation(userId);
 
   const isPartialYear =
-    year === Number(today.slice(0, 4));
+    year === getFiscalYearOfDate(today);
 
-  const fromDate = `${year}-01-01`;
+  const { from: fromDate, to: yearEnd } =
+    getFiscalYearRange(year);
 
   const cutoffDate = isPartialYear
     ? today
-    : `${year}-12-31`;
+    : yearEnd;
 
   const [zoneRows, weekRows] =
     await Promise.all([
@@ -712,7 +893,7 @@ async function buildYearlyReportModel({
 
     weeksByZone.get(row.zoneId).push({
       weekStart: row.weekStart,
-      isoWeek: getIsoWeekNumber(row.weekStart),
+      fiscalWeek: getFiscalWeekNumberOf(row.weekStart),
       scheduledCount: row.scheduledCount,
       conductedCount: row.conductedCount,
     });
@@ -776,6 +957,7 @@ async function buildYearlyReportModel({
       code: location.code,
     },
     year,
+    yearLabel: formatFiscalYear(year),
     fromDate,
     cutoffDate,
     isPartialYear,
@@ -808,7 +990,7 @@ export async function getYearlyReportPdf({
     fileName: toFileName([
       "yearly-inspection-report",
       model.plant.code ?? model.plant.name,
-      model.year,
+      `fy${model.yearLabel}`,
     ]),
   };
 }

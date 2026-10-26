@@ -1,8 +1,16 @@
 import AppError from "../../shared/errors/AppError.js";
 
 import {
+  PLANNING_ROLES,
   USER_ROLES,
 } from "../../shared/constants/roles.js";
+
+import {
+  formatFiscalYear,
+  getFiscalWeekNumber,
+  getFiscalYearOfDate,
+  getFiscalYearRange,
+} from "../../shared/fiscalYear.js";
 
 import * as dashboardRepository
   from "./dashboard.repository.js";
@@ -13,6 +21,24 @@ import * as dashboardRepository
  * first one they hold could randomly cost an officer who is also an
  * HOD their week card.
  */
+/*
+ * Who gets the officer's week card, and which of them may edit it.
+ */
+const WEEK_CARD_ROLES = [
+  USER_ROLES.EHS_OFFICER,
+  USER_ROLES.PLANT_HEAD,
+];
+
+function hasPlanningRole(user) {
+  const roles = Array.isArray(user?.roles)
+    ? user.roles.map(normalizeRole)
+    : [];
+
+  return PLANNING_ROLES.some((role) =>
+    roles.includes(role),
+  );
+}
+
 const MANAGEMENT_ROLE_PRIORITY = [
   USER_ROLES.EHS_OFFICER,
   USER_ROLES.HOD,
@@ -93,19 +119,24 @@ function getMonthRange(year, month) {
   };
 }
 
+/*
+ * The company year runs from 1 April to 31 March (docs/24 D23), so the
+ * year-to-date metrics start on 1 April, not on 1 January. `year` here
+ * is the calendar year the company year starts in.
+ */
 function getYearRange(year) {
   return {
-    yearStart: `${year}-01-01`,
+    yearStart: getFiscalYearRange(year).from,
   };
 }
 
 /*
  * The "till date" edge of the year-to-date metrics: today, or the last
- * day of the year once that year is behind us, so looking back at a
+ * day of the company year once that year is behind us, so looking back at a
  * finished year reports the whole of it rather than nothing.
  */
 function getMetricsCutoff(year, referenceDate) {
-  const endOfYear = `${year}-12-31`;
+  const endOfYear = getFiscalYearRange(year).to;
   const today = formatDateOnly(referenceDate);
 
   return today < endOfYear
@@ -148,41 +179,21 @@ function getCurrentWeekRange(referenceDate) {
   };
 }
 
+/**
+ * The week number of the week a date falls in, counted from the first
+ * Monday on or after 1 April (shared/fiscalYear.js).
+ */
 function getIsoWeekNumber(dateValue) {
-  const date = new Date(
-    `${dateValue}T00:00:00.000Z`,
-  );
+  /*
+   * Audit dates arrive as a "YYYY-MM-DD" string or as a Date,
+   * depending on which query produced them.
+   */
+  const dateOnly =
+    dateValue instanceof Date
+      ? dateValue.toISOString().slice(0, 10)
+      : String(dateValue).slice(0, 10);
 
-  const workingDate = new Date(date);
-
-  const dayNumber =
-    workingDate.getUTCDay() || 7;
-
-  workingDate.setUTCDate(
-    workingDate.getUTCDate() +
-      4 -
-      dayNumber,
-  );
-
-  const yearStart = new Date(
-    Date.UTC(
-      workingDate.getUTCFullYear(),
-      0,
-      1,
-    ),
-  );
-
-  return Math.ceil(
-    (
-      (
-        workingDate -
-        yearStart
-      ) /
-        86400000 +
-      1
-    ) /
-      7,
-  );
+  return getFiscalWeekNumber(dateOnly);
 }
 
 function addDaysToDateOnly(
@@ -253,8 +264,8 @@ function parseOfficerWeekStart(
 /*
  * The range a zone-level edit made from this week reaches, which is
  * the range PATCH /patrols/zones/:zoneId/assignment applies for that
- * from-date: max(week's Monday, current Monday) to 31 December of that
- * year. A week that is not past starts on or after the current Monday,
+ * from-date: max(week's Monday, current Monday) to the end of the
+ * company year (31 March). A week that is not past starts on or after the current Monday,
  * so the max is the week's own Monday. Both null for a past week, which
  * is read-only.
  */
@@ -272,7 +283,9 @@ function getZoneEditRange(
   return {
     zoneEditFromDate: weekStart,
     zoneEditToDate:
-      `${weekStart.slice(0, 4)}-12-31`,
+      getFiscalYearRange(
+        getFiscalYearOfDate(weekStart),
+      ).to,
   };
 }
 
@@ -436,9 +449,10 @@ function getZoneStatusCode({
  * whoever was rostered then. In the current and later weeks a zone
  * offers a one-off swap of this audit while nobody has started on it,
  * and a zone-level edit while the zone has anything left to reassign
- * from this week to 31 December.
+ * from this week to the end of the company year (31 March).
  */
 function buildOfficerWeek({
+  canEdit,
   weekStart,
   weekEnd,
   currentWeekStart,
@@ -501,6 +515,7 @@ function buildOfficerWeek({
        * patrols module enforces when it saves the swap.
        */
       canEditAssignment:
+        canEdit &&
         !isPastWeek &&
         row.patrolStatus === "SCHEDULED" &&
         !row.observationReportId,
@@ -512,6 +527,7 @@ function buildOfficerWeek({
        * report filed on Monday never blocks changing the zone's future.
        */
       canEditZone:
+        canEdit &&
         !isPastWeek &&
         reassignableCount > 0,
     });
@@ -520,7 +536,10 @@ function buildOfficerWeek({
   return {
     weekStart,
     weekEnd,
-    isoWeek: getIsoWeekNumber(weekStart),
+    fiscalWeek: getIsoWeekNumber(weekStart),
+    fiscalYearLabel: formatFiscalYear(
+      getFiscalYearOfDate(weekStart),
+    ),
     isCurrentWeek:
       weekStart === currentWeekStart,
     isPastWeek,
@@ -546,6 +565,7 @@ async function loadOfficerWeek({
   plantId,
   requestedWeekStart,
   referenceDate,
+  canEdit,
 }) {
   const {
     weekStart: currentWeekStart,
@@ -615,6 +635,7 @@ async function loadOfficerWeek({
       : new Map();
 
   return buildOfficerWeek({
+    canEdit,
     weekStart,
     weekEnd,
     currentWeekStart,
@@ -659,6 +680,7 @@ export async function getOfficerWeek({
     plantId: plant.id,
     requestedWeekStart,
     referenceDate,
+    canEdit: hasPlanningRole(user),
   });
 }
 
@@ -741,8 +763,10 @@ export async function getDashboardData({
     selectedMonth,
   );
 
-  const currentYear =
-    referenceDate.getUTCFullYear();
+  /* The company year the metrics cover, named by the year it starts. */
+  const currentYear = getFiscalYearOfDate(
+    formatDateOnly(referenceDate),
+  );
 
   const { yearStart } =
     getYearRange(currentYear);
@@ -781,12 +805,14 @@ export async function getDashboardData({
           userId: user.id,
           monthStart,
           monthEnd,
+          plantId: managementPlant?.id ?? null,
         }),
 
       dashboardRepository
         .findManagementCurrentWeekPatrols({
           weekStart,
           weekEnd,
+          plantId: managementPlant?.id ?? null,
         }),
 
       /*
@@ -809,22 +835,24 @@ export async function getDashboardData({
     ]);
 
     /*
-     * The weekly plan card is an EHS Officer feature: every location
-     * has its own officer, so scoping by their plant is what makes a
-     * single inspection week meaningful. HOD/Plant Head/Admin keep the
-     * existing plant-wide nextWeek list below.
+     * The weekly plan card is for the EHS Officer, who edits it, and the
+     * Plant Head, who sees the same card read-only (docs/24 D15): every
+     * location has its own officer and Plant Head, so scoping by their
+     * plant is what makes a single inspection week meaningful. HOD and
+     * Admin keep the existing plant-wide nextWeek list below.
      */
     let officerWeek = null;
 
     if (
-      dashboardRole ===
-        USER_ROLES.EHS_OFFICER &&
+      WEEK_CARD_ROLES.includes(dashboardRole) &&
       managementPlant
     ) {
       officerWeek = await loadOfficerWeek({
         plantId: managementPlant.id,
         requestedWeekStart: null,
         referenceDate,
+        canEdit:
+          hasPlanningRole(user),
       });
     }
 
@@ -838,6 +866,7 @@ export async function getDashboardData({
 
       metricsPeriod: {
         year: currentYear,
+        yearLabel: formatFiscalYear(currentYear),
         startDate: yearStart,
         endDate: metricsCutoff,
         scopeName:
@@ -928,6 +957,7 @@ export async function getDashboardData({
 
     metricsPeriod: {
       year: currentYear,
+      yearLabel: formatFiscalYear(currentYear),
       startDate: yearStart,
       endDate: metricsCutoff,
       scopeName: null,

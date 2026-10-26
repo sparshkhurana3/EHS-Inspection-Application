@@ -20,6 +20,11 @@ import {
   logger,
 } from "./config/logger.js";
 
+import {
+  startAlertScheduler,
+  stopAlertScheduler,
+} from "./modules/alerts/alertScheduler.js";
+
 let server;
 
 async function startServer() {
@@ -74,6 +79,8 @@ async function startServer() {
         );
       },
     );
+
+    startAlertScheduler();
   } catch (error) {
     logger.error(
       "Backend startup failed.",
@@ -94,6 +101,8 @@ async function shutdown(signal) {
       signal,
     },
   );
+
+  stopAlertScheduler();
 
   if (server) {
     server.close(async () => {

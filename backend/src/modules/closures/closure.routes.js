@@ -19,7 +19,7 @@ import {
 } from "../../middleware/storeUploadedFiles.js";
 
 import {
-  MANAGEMENT_ROLES,
+  PLANNING_ROLES,
 } from "../../shared/constants/roles.js";
 
 import {
@@ -71,7 +71,7 @@ router.get(
 router.get(
   "/pending-approvals",
   authenticate,
-  authorize(...MANAGEMENT_ROLES),
+  authorize(...PLANNING_ROLES),
   getPendingApprovals,
 );
 
@@ -155,7 +155,7 @@ router.post(
 router.post(
   "/:closureId/approve",
   authenticate,
-  authorize(...MANAGEMENT_ROLES),
+  authorize(...PLANNING_ROLES),
   closureReviewValidationRules,
   validate,
   approveClosure,
@@ -164,7 +164,7 @@ router.post(
 router.post(
   "/:closureId/reject",
   authenticate,
-  authorize(...MANAGEMENT_ROLES),
+  authorize(...PLANNING_ROLES),
   rejectClosureValidationRules,
   validate,
   rejectClosure,

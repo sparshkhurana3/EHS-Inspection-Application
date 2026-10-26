@@ -125,7 +125,7 @@ function ZoneDetail({ zone }) {
  * inline auditor/auditee edit, and an expandable "current progress"
  * view.
  *
- * The edit either reassigns the zone from this week to 31 December or
+ * The edit either reassigns the zone from this week to 31 March or
  * swaps the people on this one audit. The zone option stays available
  * after this week's audit has been filed, so a filed audit never
  * blocks changing the zone's future.

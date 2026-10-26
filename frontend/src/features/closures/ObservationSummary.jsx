@@ -102,6 +102,10 @@ export default function ObservationSummary({
           value={closure.auditorName}
         />
         <Field
+          label="HOD of the auditee"
+          value={closure.hodName}
+        />
+        <Field
           label="Submitted"
           value={formatDate(
             closure.observationSubmittedAt,

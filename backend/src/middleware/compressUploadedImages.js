@@ -81,10 +81,17 @@ sharp.block({
   operation: ["VipsForeignLoad"],
 });
 
+/*
+ * The two buffer loaders are allowed as well: the weekly report reads
+ * stored photographs into memory (they may live in SharePoint) before
+ * making its thumbnails. Still only JPEG and PNG (docs/24 D21).
+ */
 sharp.unblock({
   operation: [
     "VipsForeignLoadJpegFile",
     "VipsForeignLoadPngFile",
+    "VipsForeignLoadJpegBuffer",
+    "VipsForeignLoadPngBuffer",
   ],
 });
 

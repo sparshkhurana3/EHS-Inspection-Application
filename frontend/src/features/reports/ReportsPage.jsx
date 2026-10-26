@@ -15,6 +15,8 @@ import YearlyReportView from "./YearlyReportView.jsx";
 import useReport from "./useReport.js";
 import useReportOptions from "./useReportOptions.js";
 
+import { formatFiscalYear } from "./reportFormat.js";
+
 function pad(value) {
   return String(value).padStart(2, "0");
 }
@@ -53,6 +55,10 @@ export default function ReportsPage() {
 
   const [jumpWeek, setJumpWeek] = useState("");
   const [jumpYear, setJumpYear] = useState("");
+
+  /* Photographs are in the weekly PDF unless the officer opts out. */
+  const [includePhotos, setIncludePhotos] =
+    useState(true);
 
   /*
    * A week reached by number may be older than the picker's list. It
@@ -98,8 +104,8 @@ export default function ReportsPage() {
       setCustomWeek({
         weekStart: result.weekStart,
         weekEnd: result.weekEnd,
-        isoWeek: result.isoWeek,
-        isoYear: result.isoYear,
+        fiscalWeek: result.fiscalWeek,
+        fiscalYear: result.fiscalYear,
       });
 
       setJumpWeek("");
@@ -153,8 +159,8 @@ export default function ReportsPage() {
           setCustomWeek({
             weekStart: result.weekStart,
             weekEnd: result.weekEnd,
-            isoWeek: result.isoWeek,
-            isoYear: result.isoYear,
+            fiscalWeek: result.fiscalWeek,
+            fiscalYear: result.fiscalYear,
           });
         }
       });
@@ -177,8 +183,8 @@ export default function ReportsPage() {
 
     if (jumpWeek !== "" && jumpYear !== "") {
       return {
-        isoYear: jumpYear,
-        isoWeek: jumpWeek,
+        fiscalYear: jumpYear,
+        fiscalWeek: jumpWeek,
       };
     }
 
@@ -210,7 +216,9 @@ export default function ReportsPage() {
       reportState.download(
         "yearly",
         params,
-        `yearly-inspection-report-${params.year}.pdf`,
+        `yearly-inspection-report-fy${formatFiscalYear(
+          params.year,
+        )}.pdf`,
       );
 
       return;
@@ -221,19 +229,21 @@ export default function ReportsPage() {
         entry.weekStart === params.weekStart,
     );
 
-    const fileName = params.isoWeek
-      ? `weekly-inspection-report-${
-          params.isoYear
-        }-w${pad(params.isoWeek)}.pdf`
+    const fileName = params.fiscalWeek
+      ? `weekly-inspection-report-fy${formatFiscalYear(
+          params.fiscalYear,
+        )}-w${pad(params.fiscalWeek)}.pdf`
       : week
-        ? `weekly-inspection-report-${
-            week.isoYear
-          }-w${pad(week.isoWeek)}.pdf`
+        ? `weekly-inspection-report-fy${formatFiscalYear(
+            week.fiscalYear,
+          )}-w${pad(week.fiscalWeek)}.pdf`
         : "weekly-inspection-report.pdf";
 
     reportState.download(
       "weekly",
-      params,
+      includePhotos
+        ? params
+        : { ...params, includePhotos: "false" },
       fileName,
     );
   }
@@ -308,8 +318,20 @@ export default function ReportsPage() {
         canGenerate={getParams() !== null}
         generating={reportState.generating}
         downloading={reportState.downloading}
+        includePhotos={includePhotos}
+        onIncludePhotosChange={setIncludePhotos}
         onGenerate={handleGenerate}
         onDownload={handleDownload}
+        onDownloadSpreadsheet={() =>
+          reportState.downloadSpreadsheet(
+            `zone-by-week-report-${new Date()
+              .toISOString()
+              .slice(0, 10)}.xlsx`,
+          )
+        }
+        downloadingSpreadsheet={
+          reportState.downloadingSpreadsheet
+        }
       />
 
       {reportState.error ? (

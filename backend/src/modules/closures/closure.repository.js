@@ -58,6 +58,9 @@ function mapClosure(row) {
     ehsOfficerName:
       row.ehs_officer_name,
 
+    hodName:
+      row.hod_name ?? null,
+
     /*
      * The patrol's people by id, so the client can recognise the
      * signed-in user among them: an EHS Officer may approve a closure
@@ -331,7 +334,10 @@ const CLOSURE_SELECT = `
       AS auditee_name,
 
     ehs_officer.full_name
-      AS ehs_officer_name
+      AS ehs_officer_name,
+
+    hod.full_name
+      AS hod_name
 
   FROM closure_requests
     AS closure_request
@@ -364,6 +370,9 @@ const CLOSURE_SELECT = `
   LEFT JOIN users AS ehs_officer
     ON ehs_officer.id =
        patrol.ehs_officer_id
+
+  LEFT JOIN users AS hod
+    ON hod.id = observation_report.hod_id
 
   LEFT JOIN users AS reviewer
     ON reviewer.id = closure_request.reviewed_by
@@ -534,6 +543,57 @@ export async function findClosureByIdForUser(
           OR patrol.auditor_id = $2
           OR patrol.auditee_id = $2
           OR patrol.ehs_officer_id = $2
+        )
+
+      LIMIT 1
+    `,
+    [closureId, userId],
+  );
+
+  return mapClosure(result.rows[0]);
+}
+
+/**
+ * One closure, readable by anyone on its patrol and also by a
+ * management user (EHS Officer, HOD, Plant Head, Admin) at the same
+ * plant, so a Plant Head can open any closure at their location
+ * (docs/24 D17). **For reads only.** Every write keeps
+ * findClosureByIdForUser or findClosureByIdForAuditee, so seeing a
+ * closure never grants the right to change or approve it.
+ */
+export async function findClosureByIdForViewer(
+  {
+    closureId,
+    userId,
+  },
+  client = databasePool,
+) {
+  const result = await client.query(
+    `
+      ${CLOSURE_SELECT}
+
+      WHERE
+        closure_request.id = $1
+        AND (
+          closure_request.requested_by = $2
+          OR patrol.auditor_id = $2
+          OR patrol.auditee_id = $2
+          OR patrol.ehs_officer_id = $2
+          OR EXISTS (
+            SELECT 1
+            FROM users AS me
+            JOIN user_roles AS ur
+              ON ur.user_id = me.id
+            JOIN roles AS ro
+              ON ro.id = ur.role_id
+            WHERE
+              me.id = $2
+              AND me.plant_id = unit.plant_id
+              AND ro.code IN (
+                'EHS_OFFICER', 'HOD',
+                'PLANT_HEAD', 'ADMIN'
+              )
+          )
         )
 
       LIMIT 1

@@ -526,6 +526,7 @@ export async function submitObservation({
   userId,
   patrolId,
   findingDate,
+  hodId,
   observations,
   photographs,
 }) {
@@ -640,6 +641,30 @@ export async function submitObservation({
         }
 
         /*
+         * The auditee's HOD is mandatory and must be an HOD of this
+         * patrol's own location who is not the auditee (docs/24 D4):
+         * escalating an auditee's lateness to the auditee would achieve
+         * nothing.
+         */
+        const hod =
+          await observationRepository
+            .findValidHodForPatrol(
+              {
+                patrolId,
+                hodId,
+              },
+              client,
+            );
+
+        if (!hod) {
+          throw new AppError(
+            "Select an HOD from your location for the auditee. The auditee cannot be their own HOD.",
+            400,
+            "INVALID_HOD",
+          );
+        }
+
+        /*
          * A patrol covers the whole zone, so the auditor names the area
          * each observation was in. Every area must be one of that
          * zone's own; an id from another zone is rejected rather than
@@ -719,6 +744,8 @@ export async function submitObservation({
                 plantLocation:
                   patrol.plantLocation,
 
+                hodId: hod.id,
+
                 items: resolvedItems,
               },
               client,
@@ -792,6 +819,34 @@ export async function submitObservation({
 
     throw error;
   }
+}
+
+/**
+ * The HODs an auditor may name for the auditee of one of their patrols.
+ */
+export async function getHodOptions({
+  userId,
+  patrolId,
+}) {
+  const { found, hods } =
+    await observationRepository
+      .findHodOptionsForPatrol({
+        patrolId,
+        auditorId: userId,
+      });
+
+  if (!found) {
+    throw new AppError(
+      "The patrol was not found or is not assigned to you as auditor.",
+      404,
+      "ASSIGNED_PATROL_NOT_FOUND",
+    );
+  }
+
+  return {
+    message: "HOD options loaded.",
+    hods,
+  };
 }
 
 /**

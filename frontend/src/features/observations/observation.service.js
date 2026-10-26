@@ -64,12 +64,14 @@ export function fetchObservationItemPhotograph(
 export function createObservationReport({
   patrolId,
   findingDate,
+  hodId,
   observations,
 }) {
   const formData = new FormData();
 
   formData.append("patrolId", String(patrolId));
   formData.append("findingDate", findingDate);
+  formData.append("hodId", String(hodId));
 
   formData.append(
     "observations",
@@ -98,6 +100,19 @@ export function createObservationReport({
     method: "POST",
     body: formData,
   });
+}
+
+/**
+ * The HODs the auditor may name for this patrol's auditee: HOD users at
+ * the patrol's location, never the auditee themselves.
+ */
+export function fetchHodOptions(patrolId) {
+  return apiRequest(
+    `/observations/hod-options?patrolId=${encodeURIComponent(
+      patrolId,
+    )}`,
+    { method: "GET" },
+  );
 }
 
 export function recordNoObservation(patrolId) {

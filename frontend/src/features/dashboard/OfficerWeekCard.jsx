@@ -36,6 +36,7 @@ function getWeekHeading(week) {
  */
 function EmptyWeekNote({
   week,
+  canEdit,
   className = "officer-week-empty",
 }) {
   const otherWeeksScheduled = Boolean(
@@ -60,14 +61,16 @@ function EmptyWeekNote({
         No inspections are scheduled.
       </strong>
 
-      <p>
-        Upload the weekly roster on
-        the{" "}
-        <Link to="/plan">
-          Plan page
-        </Link>
-        .
-      </p>
+      {canEdit ? (
+        <p>
+          Upload the weekly roster on
+          the{" "}
+          <Link to="/plan">
+            Plan page
+          </Link>
+          .
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -86,7 +89,7 @@ function WeekSummary({
         <h3>{getWeekHeading(week)}</h3>
 
         <p>
-          {`Week ${week.isoWeek} · ${formatDate(
+          {`Week ${week.fiscalWeek} · ${formatDate(
             week.weekStart,
           )} to ${formatDate(
             week.weekEnd,
@@ -131,6 +134,7 @@ export default function OfficerWeekCard({
   onNextWeek,
   onCurrentWeek,
   onReload,
+  canEdit = true,
 }) {
   /*
    * Deliberately not reset when the week changes, so the officer can
@@ -151,6 +155,14 @@ export default function OfficerWeekCard({
     useState("");
 
   useEffect(() => {
+    /*
+     * The Plant Head sees this card read-only and may not read the
+     * planning lookups (docs/24 D15), so they are not asked for.
+     */
+    if (!canEdit) {
+      return undefined;
+    }
+
     let cancelled = false;
 
     fetchPlanningLookups()
@@ -170,7 +182,7 @@ export default function OfficerWeekCard({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [canEdit]);
 
   const zoneEditFromDate =
     week?.zoneEditFromDate ?? null;
@@ -272,6 +284,7 @@ export default function OfficerWeekCard({
 
         <EmptyWeekNote
           week={week}
+          canEdit={canEdit}
           className="empty-dashboard-card"
         />
       </section>
@@ -376,7 +389,10 @@ export default function OfficerWeekCard({
         </div>
 
         {weekIsEmpty ? (
-          <EmptyWeekNote week={week} />
+          <EmptyWeekNote
+            week={week}
+            canEdit={canEdit}
+          />
         ) : expanded ? (
           <div
             id="officer-week-zones"

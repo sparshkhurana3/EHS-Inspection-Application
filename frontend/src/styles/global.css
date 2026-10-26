@@ -628,6 +628,7 @@ a { color: inherit; }
  * browser's default size. The closure action plan uses .form-field.
  */
 .form-field input,
+.form-field select,
 .form-field textarea {
   width: 100%;
   min-height: 47px;
@@ -643,6 +644,7 @@ a { color: inherit; }
 .form-field input::placeholder,
 .form-field textarea::placeholder { color: #98a2b3; }
 .form-field input:focus,
+.form-field select:focus,
 .form-field textarea:focus { border-color: #101828; box-shadow: 0 0 0 4px rgba(16, 24, 40, 0.12); }
 .auth-submit-button { width: 100%; margin-top: 4px; }
 
@@ -2717,7 +2719,7 @@ a { color: inherit; }
 .report-observation-row {
   display: grid;
   grid-template-columns:
-    28px 1fr 40px 74px 2.2fr 2fr 1fr;
+    28px 1fr 40px 74px 2.2fr 2fr 1fr 104px;
   gap: 10px;
   padding: 8px 10px;
   font-size: 0.74rem;
@@ -2743,6 +2745,67 @@ a { color: inherit; }
 
 .report-observation-row small {
   display: block;
+}
+
+.report-photo-thumb {
+  display: block;
+  width: 96px;
+  height: 72px;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+  background: #f2f4f7;
+  cursor: pointer;
+}
+
+.report-photo-thumb:hover {
+  border-color: #344054;
+}
+
+.report-photo-thumb:focus-visible {
+  outline: 2px solid #101828;
+  outline-offset: 2px;
+}
+
+.report-photo-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.report-photo-placeholder {
+  display: grid;
+  width: 96px;
+  height: 72px;
+  border: 1px dashed #d0d5dd;
+  border-radius: 8px;
+  color: #98a2b3;
+  font-size: 0.7rem;
+  place-items: center;
+}
+
+.report-photo-dialog {
+  max-width: min(92vw, 960px);
+  padding: 14px;
+  border: 1px solid #d0d5dd;
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.report-photo-dialog::backdrop {
+  background: rgba(16, 24, 40, 0.6);
+}
+
+.report-photo-dialog img {
+  display: block;
+  max-width: 100%;
+  max-height: 78vh;
+  margin: 0 auto 12px;
+  border-radius: 8px;
+  background: #101828;
+  object-fit: contain;
 }
 
 .report-risk {

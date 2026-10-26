@@ -49,6 +49,14 @@ Unique on `LOWER(username)` and `LOWER(email)`. The `ENTRA` value reserves Micro
 
 It is a queue of in-flight sign-ins, not a session store — rows live ten minutes, are single-use, and are pruned whenever a sign-in starts. `code_verifier` is blanked the moment the row is claimed, and the handoff code is only ever stored hashed, so read access to this table yields nothing usable. See [18](18-entra-sso-plan.md).
 
+### HOD and email alerts (migration 020, [24](24-hod-escalation-plant-head-photos-plan.md))
+
+**`observation_reports.hod_id`** (`BIGINT` → `users`, nullable, indexed): the auditee's HOD, named by the auditor when filing a report with observations. `NULL` on "no observation to record" reports and on every report filed before the migration; those never escalate.
+
+**`observation_alerts`** — one row per escalation email sent about a report to one person: `observation_report_id`, `level` (`HOD` = the 15-day alert, `PLANT_HEAD` = the 30-day one), `recipient_user_id`, `recipient_email`, `sent_at`, `UNIQUE (observation_report_id, level, recipient_user_id)`. A row is written only after the SMTP server accepted the message, so a failed send is retried and a sent one is never repeated.
+
+**`weekly_digest_log`** — one row per person per Monday reminder: `user_id`, `digest_date`, `recipient_email`, `pending_reports`, `pending_closures`, `sent_at`, `UNIQUE (user_id, digest_date)`.
+
 ### Location master data
 
 **`plants`** — `id`, `name`, `code` (unique), `is_active`, `created_at`.

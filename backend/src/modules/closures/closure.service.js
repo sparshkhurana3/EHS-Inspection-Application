@@ -352,7 +352,7 @@ export async function getClosureById({
 }) {
   const closure =
     await closureRepository
-      .findClosureByIdForUser({
+      .findClosureByIdForViewer({
         closureId,
         userId,
       });
@@ -1141,8 +1141,8 @@ export async function deleteClosureItemEvidence({
 
 /**
  * Serves one evidence photograph to anybody entitled to read the
- * closure it belongs to, which is the auditee, the auditor and the EHS
- * Officer of the patrol. Files are never exposed statically.
+ * closure it belongs to: the auditee, the auditor and the EHS Officer of
+ * the patrol, and management users at the same plant (read only). Files are never exposed statically.
  */
 export async function getClosureItemEvidenceFile({
   userId,
@@ -1157,7 +1157,7 @@ export async function getClosureItemEvidenceFile({
    */
   const closure =
     await closureRepository
-      .findClosureByIdForUser({
+      .findClosureByIdForViewer({
         closureId,
         userId,
       });

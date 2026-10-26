@@ -179,8 +179,8 @@ that your organisation actually uses. For every one:
 | Display name | Value | What it lets someone do |
 |---|---|---|
 | EHS Officer | `EHS_OFFICER` | Plan patrols, upload the weekly roster, change a zone's auditor and auditee from the dashboard, download the inspection report, approve or reject closures. Can also be rostered as an auditor or auditee |
-| Head of Department | `HOD` | Plant-wide management dashboard; can also approve or reject closures |
-| Plant Head | `PLANT_HEAD` | Plant-wide management dashboard; can also approve or reject closures |
+| Head of Department | `HOD` | Can be chosen by auditors as the HOD of an auditee, and then gets an email if the auditee has not closed a report within 15 days. Can read reports and closures at their location. Can also be an auditor or auditee. **Cannot** approve or reject closures |
+| Plant Head | `PLANT_HEAD` | Sees everything at their location: every unit and zone, the dashboard (read-only), every report and the Report page. Gets an email if a report is not closed within 30 days. Can also be an auditor or auditee. **Cannot** approve or reject closures |
 | Administrator | `ADMIN` | Everything an EHS Officer can do. There are no separate administration screens |
 | Standard user | `USER` | Carry out audits as auditor or auditee |
 
@@ -194,10 +194,17 @@ Notes that save trouble later:
   as an auditor or auditee they do that work like anyone else. Someone
   who holds `EHS_OFFICER` together with `HOD` or `PLANT_HEAD` still gets
   the officer's dashboard.
-- **Management roles can approve closures.** Anyone holding
-  `EHS_OFFICER`, `HOD`, `PLANT_HEAD` or `ADMIN` who is also the auditor
-  or auditee of a patrol can approve that patrol's closure. Keep that in
-  mind when you roster managers as auditees.
+- **Only the EHS Officer (and Admin) can approve or reject closures.**
+  An HOD or Plant Head can read a closure at their location but not
+  approve, reject or edit it. (An EHS Officer who is also the auditee of
+  a patrol can still approve that patrol's closure; keep that in mind
+  when you roster officers as auditees.)
+- **Each location needs at least one HOD, and the HOD and Plant Head need
+  a plant.** The auditor picks the auditee's HOD from the people with the
+  `HOD` role at the same location; with none, reports with observations
+  cannot be sent from it. Assign `HOD` and `PLANT_HEAD` to the right
+  people and make sure each has a work email, because the alert emails
+  go to the address on their account.
 - **That includes the EHS Officer approving their own action plans.**
   When the officer is the auditee of an audit they planned, its closure
   still comes to their own approval queue, and they may approve it. This was a

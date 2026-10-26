@@ -26,19 +26,21 @@ export default function ReportHeader({ report }) {
         <p>
           {isWeekly
             ? `${report.plant.name} · Week ${
-                report.isoWeek
-              }, ${report.isoYear} · ${formatReportDate(
+                report.fiscalWeek
+              }, FY ${report.fiscalYearLabel} · ${formatReportDate(
                 report.weekStart,
               )} – ${formatReportDate(
                 report.weekEnd,
               )}`
-            : `${report.plant.name} · ${
-                report.year
-              }${
+            : `${report.plant.name} · FY ${
+                report.yearLabel
+              } · ${formatReportDate(
+                report.fromDate,
+              )} – ${formatReportDate(
+                report.cutoffDate,
+              )}${
                 report.isPartialYear
-                  ? ` · 1 Jan – ${formatReportDate(
-                      report.cutoffDate,
-                    )} (year to date)`
+                  ? " (year to date)"
                   : ""
               }`}
         </p>

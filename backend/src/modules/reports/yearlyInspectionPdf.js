@@ -61,8 +61,8 @@ export async function buildYearlyInspectionPdf(
   { generatedBy },
 ) {
   const period = model.isPartialYear
-    ? `${model.year} · 1 Jan – ${formatReportDate(model.cutoffDate)} (year to date)`
-    : String(model.year);
+    ? `FY ${model.yearLabel} · ${formatReportDate(model.fromDate)} – ${formatReportDate(model.cutoffDate)} (year to date)`
+    : `FY ${model.yearLabel} · ${formatReportDate(model.fromDate)} – ${formatReportDate(model.cutoffDate)}`;
 
   const { doc, finished } =
     await createReportDocument({
@@ -72,7 +72,7 @@ export async function buildYearlyInspectionPdf(
 
       generatedLine: `Generated ${formatReportDate(model.generatedAt)} by ${generatedBy}`,
 
-      documentTitle: `Yearly inspection report · ${model.plant.name} · ${model.year}`,
+      documentTitle: `Yearly inspection report · ${model.plant.name} · FY ${model.yearLabel}`,
     });
 
   let y = BODY_TOP;

@@ -28,6 +28,7 @@ export const PLANNING_ROLES = Object.freeze([
  */
 export const REPORT_ROLES = Object.freeze([
   APP_ROLES.EHS_OFFICER,
+  APP_ROLES.PLANT_HEAD,
 ]);
 
 export function normalizeRole(role) {

@@ -59,6 +59,9 @@ function ObservationFormPanel({
         maxDescriptionWords={
           form.maxDescriptionWords
         }
+        hods={form.hods}
+        hodsLoading={form.hodsLoading}
+        hodsError={form.hodsError}
         submitting={form.submitting}
         onFieldChange={form.updateField}
         onItemFieldChange={form.updateItemField}

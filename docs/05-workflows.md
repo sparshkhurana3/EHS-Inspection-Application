@@ -73,7 +73,7 @@ stateDiagram-v2
 
 **The auditor's own view of a report is binary** and derived, not stored: `OPEN` while no report exists, `CLOSED` once one does (either sent to the auditee or closed with no observations). The stored column above still drives the auditee/officer loop. The API also returns `lifecycleStatus`/`lifecycleLabel` summarising the whole journey: `NO_OBSERVATIONS`, `CLOSED_VIA_CLOSURE` (the officer approved the closure — the terminal state for a report that had findings), `EHS_OFFICER_ACTION_REQUIRED`, `REEXAMINATION_REQUIRED`, `ACTION_PLAN_IN_PROGRESS`, else `WITH_AUDITEE`.
 
-**Deadline.** A report is due by **Thursday of the audit's ISO week** (`dueDate` = Monday + 3 days). Past that it is flagged `isOverdue` and kept in the auditor's pending list for 4 more weeks, but submission is never blocked.
+**Deadline.** A report is due by **Thursday of the audit's week** (`dueDate` = Monday + 3 days). Past that it is flagged `isOverdue` and kept in the auditor's pending list for 4 more weeks, but submission is never blocked.
 
 ### `closure_requests.status`
 
@@ -106,7 +106,7 @@ Decided in [20](20-dashboard-assignment-editing-plan.md) D3–D5 and D7, amendin
 
 **Zone edit** (`PATCH /api/patrols/zones/:zoneId/assignment`, the dashboard's "Every audit of this zone"):
 
-1. Range: from `max(fromDate, Monday of the current UTC week)` to 31 December of that date's year. The dashboard sends the week card's `zoneEditFromDate`, which is the Monday of the week being viewed.
+1. Range: from `max(fromDate, Monday of the current UTC week)` to the end of the company year (31 March) that date falls in. The dashboard sends the week card's `zoneEditFromDate`, which is the Monday of the week being viewed.
 2. Every reassignable audit of the zone in the range takes the new pair, hand-planned and roster-generated alike. Under-way audits in the range are counted as skipped and named in the confirmation.
 3. The zone's roster row takes the new pair if its effective range overlaps the reassigned one, so the roster page and the next report show it.
 4. Nothing reassignable → `409 NO_REASSIGNABLE_AUDITS`, nothing changed.
@@ -138,18 +138,41 @@ Decided in [20](20-dashboard-assignment-editing-plan.md) D8–D10.
 
 **Weekly**: lists every audit scheduled at the officer's plant in one Monday-to-Sunday week. **Inspected** means an observation report was filed, the same test the dashboard metrics and the spreadsheet report use, so "no observation to record" counts as inspected. **Not done** is red. A zone with more than one audit that week counts as inspected in the summary only when every one of them has a report, and as **with observations** when any report has findings. An audit whose Thursday deadline has not yet passed still reads "Not done", with "Due by Thu …" under it.
 
-**Yearly**: per zone, unit and location, from 1 January to today (to 31 December for a past year): audits scheduled, conducted and the completion percentage (conducted ÷ scheduled), observation reports (reports with findings), observations, and closures. **"Closures" are closures approved**, because a closure row is created with every report that has findings and would otherwise always equal the observation report count; the rest are shown as open. Audits not yet due this year are not counted. A zone with nothing scheduled is listed as "Not scheduled" and left out of every percentage. Completion colour: 100% green, below 75% red, in between none; the number is always written out.
+**Yearly**: per zone, unit and location, for the company year (1 April to today, or to the following 31 March for a past year): audits scheduled, conducted and the completion percentage (conducted ÷ scheduled), observation reports (reports with findings), observations, and closures. **"Closures" are closures approved**, because a closure row is created with every report that has findings and would otherwise always equal the observation report count; the rest are shown as open. Audits not yet due this year are not counted. A zone with nothing scheduled is listed as "Not scheduled" and left out of every percentage. Completion colour: 100% green, below 75% red, in between none; the number is always written out.
+
+## The HOD on a report, and the email alerts
+
+[24](24-hod-escalation-plant-head-photos-plan.md). Email is sent over SMTP to the address on each person's account (for Microsoft sign-in users, their company address) and only when `SMTP_HOST` is set; nothing here depends on it being on.
+
+**The HOD.** The auditor must name the auditee's HOD when they file a report **with observations**: an active user with the `HOD` role at the patrol's location, never the auditee (an HOD can be an auditor or auditee like anyone else). A location with no HOD cannot file such a report; "no observation to record" needs none. It is stored on `observation_reports.hod_id`, cannot be changed afterwards, and is shown on the report, the closure and the weekly report. Reports filed before this change have none and never escalate.
+
+**Escalation.** A report with observations counts as **closed by the auditee** once its closure has reached `SUBMITTED_FOR_CLOSURE` or `APPROVED`. While it is `OPEN`, `IN_PROGRESS` or sent back for rework:
+
+| After | Who is emailed | Contents |
+|---|---|---|
+| 15 days (`HOD_ALERT_DAYS`) | the report's HOD | auditee, report number, date generated, unit and zone, observation count, closure status, a link |
+| 30 days (`PLANT_HEAD_ALERT_DAYS`) | every active Plant Head at the report's plant | the same, plus the HOD |
+
+Days are whole calendar days in `ALERT_TIMEZONE` from the date the report was generated, counted at `ALERT_SEND_TIME`. Each level goes **once per report and person**, as **one email per recipient** listing everything newly due for them, recorded in `observation_alerts` after the server accepts it (a failed send is retried at the next check). A plant with no active Plant Head, or an HOD with no email, is logged as a warning and sent once someone is there.
+
+**The Monday reminder.** Every Monday each person with work still open **from earlier weeks** gets one email: as auditor, audits before this week's Monday still without an observation report; as auditee, closures for reports generated before this week's Monday that are still open, in progress or sent back. Nobody with nothing open is emailed. One per person per Monday (`weekly_digest_log`).
+
+**Timing.** An in-process timer wakes every `ALERT_CHECK_INTERVAL_MINUTES`, does nothing until `ALERT_SEND_TIME` has passed in `ALERT_TIMEZONE`, then sends what is due and unsent. A run holds a PostgreSQL advisory lock, so two backend instances never send twice. `docker compose exec backend node scripts/alerts.js due` shows what would be sent without sending.
+
+**Approving is the EHS Officer's alone.** HOD and Plant Head can read a closure at their location but cannot approve, reject or edit one.
 
 ## Who sees what, and when
 
 | Step | Query that surfaces it | Condition |
 |---|---|---|
-| Auditor's task this week | `GET /dashboard` → `nextAudit` (every role, management included); `GET /observations/current-assignments` | patrol in current ISO week, `auditor_id = me`, no report yet |
+| Auditor's task this week | `GET /dashboard` → `nextAudit` (every role, management included); `GET /observations/current-assignments` | patrol in current week, `auditor_id = me`, no report yet |
 | Auditee's task this week | `GET /dashboard` → `nextAudit` (every role) | patrol in current week, `auditee_id = me`, report status OPEN/PENDING_AUDITEE_ACTION/REEXAMINATION_REQUIRED, and the closure **not yet submitted or approved** ([20](20-dashboard-assignment-editing-plan.md) D11; it used to test for any closure row, which the report creates at once, so the prompt never fired) |
 | Auditee's open closures | `GET /closures` | `requested_by = me`, status OPEN/IN_PROGRESS/REEXAMINATION_REQUIRED/SUBMITTED_FOR_CLOSURE, sent-back first; plus those approved in the last few days |
-| EHS review queue | `GET /closures/pending-approvals` (`MANAGEMENT_ROLES`) | status SUBMITTED_FOR_CLOSURE on patrols whose `ehs_officer_id` is me or null, oldest submission first; includes closures on which I am the auditee |
+| EHS review queue | `GET /closures/pending-approvals` (`PLANNING_ROLES`: only the EHS Officer, or Admin, approves) | status SUBMITTED_FOR_CLOSURE on patrols whose `ehs_officer_id` is me or null, oldest submission first; includes closures on which I am the auditee |
 | EHS Officer's week card | `GET /dashboard` → `officerWeek` (default week); `GET /dashboard/officer-week?weekStart=` (any week, `PLANNING_ROLES`) | the officer's plant, one Monday-to-Sunday week, non-cancelled patrols |
-| HOD / Plant Head / Admin week view | `GET /dashboard` → `nextWeek` | all non-cancelled patrols in the current week |
+| Plant Head's week card | `GET /dashboard` → `officerWeek`; `GET /dashboard/officer-week?weekStart=` (`WEEK_VIEW_ROLES`) | the same card as the officer's, **read-only**: every row has `canEditAssignment` and `canEditZone` false for a caller without a planning role |
+| HOD / Admin week view | `GET /dashboard` → `nextWeek` | non-cancelled patrols in the current week at the viewer's plant (every plant for a manager with none) |
+| Everything at my location (Plant Head, EHS Officer, HOD) | `GET /observations/history` ("Past 6 months"), the closure detail, the reports | every report at the viewer's plant from the last 6 months; closures are read-only for anyone not on the patrol |
 
 ## Invariants the code relies on
 

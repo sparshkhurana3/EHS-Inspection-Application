@@ -79,6 +79,8 @@ export async function createObservation(
           findingDate:
             req.body.findingDate,
 
+          hodId: req.body.hodId,
+
           observations:
             req.body.observations,
 
@@ -155,6 +157,25 @@ export async function getObservationItemPhotograph(
       res,
       photograph,
     );
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getHodOptions(
+  req,
+  res,
+  next,
+) {
+  try {
+    const result =
+      await observationService
+        .getHodOptions({
+          userId: req.user.id,
+          patrolId: req.query.patrolId,
+        });
+
+    res.status(200).json(result);
   } catch (error) {
     next(error);
   }

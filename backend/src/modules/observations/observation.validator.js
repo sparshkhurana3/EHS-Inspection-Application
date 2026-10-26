@@ -190,6 +190,20 @@ export const createObservationValidationRules = [
     )
     .toInt(),
 
+  body("hodId")
+    .notEmpty()
+    .withMessage(
+      "Select the HOD for the auditee.",
+    )
+    .bail()
+    .isInt({
+      min: 1,
+    })
+    .withMessage(
+      "HOD must be a valid user.",
+    )
+    .toInt(),
+
   body("findingDate")
     .notEmpty()
     .withMessage(
@@ -260,4 +274,15 @@ export const createObservationValidationRules = [
           )
         : items,
     ),
+];
+
+export const hodOptionsValidationRules = [
+  query("patrolId")
+    .isInt({
+      min: 1,
+    })
+    .withMessage(
+      "Patrol ID must be a positive integer.",
+    )
+    .toInt(),
 ];

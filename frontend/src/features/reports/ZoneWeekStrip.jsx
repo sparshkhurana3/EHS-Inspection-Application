@@ -28,7 +28,7 @@ export default function ZoneWeekStrip({
           week.conductedCount >=
           week.scheduledCount;
 
-        const description = `Week ${week.isoWeek} (${formatReportDate(
+        const description = `Week ${week.fiscalWeek} (${formatReportDate(
           week.weekStart,
         )}): ${week.conductedCount} of ${
           week.scheduledCount
@@ -50,7 +50,7 @@ export default function ZoneWeekStrip({
               aria-label={description}
             />
 
-            <small>W{week.isoWeek}</small>
+            <small>W{week.fiscalWeek}</small>
           </li>
         );
       })}

@@ -1,5 +1,8 @@
 import path from "node:path";
-import { unlink } from "node:fs/promises";
+import {
+  readFile,
+  unlink,
+} from "node:fs/promises";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
@@ -214,4 +217,49 @@ export async function sendStoredFile(
 
     res.destroy();
   }
+}
+
+/**
+ * A stored file's bytes, from the uploads volume or SharePoint, for
+ * work that needs the whole file in memory (the photographs in a PDF
+ * report). `allowedDirectory`, for a local path, is the folder the file
+ * must sit in, so a tampered path cannot read anything else. Throws
+ * when the file is missing or unreachable; the caller decides what a
+ * missing photograph means.
+ */
+export async function readStoredFile(
+  reference,
+  { allowedDirectory } = {},
+) {
+  if (isSharePointReference(reference)) {
+    const { body } = await downloadFile(reference);
+
+    const chunks = [];
+
+    for await (const chunk of Readable.fromWeb(
+      body,
+    )) {
+      chunks.push(chunk);
+    }
+
+    return Buffer.concat(chunks);
+  }
+
+  const absolutePath = path.resolve(
+    process.cwd(),
+    reference,
+  );
+
+  if (
+    allowedDirectory &&
+    !absolutePath.startsWith(
+      `${path.resolve(allowedDirectory)}${path.sep}`,
+    )
+  ) {
+    throw new Error(
+      "The stored file path is outside its folder.",
+    );
+  }
+
+  return readFile(absolutePath);
 }

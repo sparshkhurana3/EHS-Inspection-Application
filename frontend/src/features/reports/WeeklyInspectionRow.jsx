@@ -1,3 +1,5 @@
+import ObservationPhoto from "./ObservationPhoto.jsx";
+
 import {
   formatDayAndMonth,
   formatReportDate,
@@ -74,6 +76,12 @@ export default function WeeklyInspectionRow({
           <small>
             Auditee: {inspection.auditeeName}
           </small>
+
+          {inspection.hodName ? (
+            <small>
+              HOD: {inspection.hodName}
+            </small>
+          ) : null}
         </span>
 
         <span data-label="Inspection">
@@ -136,6 +144,7 @@ export default function WeeklyInspectionRow({
             <span>Observation</span>
             <span>Action plan</span>
             <span>Target date</span>
+            <span>Photo</span>
           </div>
 
           {inspection.observations.map(
@@ -199,6 +208,14 @@ export default function WeeklyInspectionRow({
                   {formatReportDate(
                     observation.targetDate,
                   )}
+                </span>
+
+                <span data-label="Photo">
+                  <ObservationPhoto
+                    reportId={inspection.reportId}
+                    itemId={observation.itemId}
+                    label={`Observation ${observation.sequenceNumber}, ${inspection.zoneName}`}
+                  />
                 </span>
               </div>
             ),
